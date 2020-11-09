@@ -109,8 +109,8 @@ We'll just put our attention on **_designing a set of APIs_** which wraps an exi
 
 ```
 public void sendMessage(ConnectionFactory connectionFactory, 
-                           Queue queue, 
-                           String text) {
+                        Queue queue, 
+                        String text) {
    try (JMSContext context = connectionFactory.createContext();){
       Message msg = context.createTextMessage(text);
       context.createProducer().send(queue, msg);
@@ -198,3 +198,43 @@ Another hierarchy with a set of common ops and type-specific ops
 - JMS is really more than that
 - JMS 2.0 brought in more goodies
 - For this session we'll just need to focus on these, which is just a subset
+
+---
+
+# What's wrong with these APIs?
+
+- they're imperative, but you can actually live with that
+- unchecked exceptions everywhere
+- side-effects everywhere
+- low-level in terms of how to build complete programs
+
+---
+
+# What can we do to improve them?
+
+- wrapping side-effects and methods which throws
+- understand what are the core-feature we want to expose
+- evaluate what is the design which better supports our intent
+
+---
+
+# Our intent
+
+- having all __effects__ explicitly marked in the types
+- properly handle __resource__ acquisition/dispose
+- avoid the client (the developer using our lib) to mess with the APIs
+- offering a __high-level__ set of APIs
+
+---
+
+# How Functional Programming can help?
+
+---
+
+# Let's start
+
+---
+
+
+
+---
