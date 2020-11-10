@@ -409,11 +409,57 @@ class JmsMessageConsumer private[lib](private[lib] val wrapped: javax.jms.JMSCon
 
 # JMSConsumer
 
-- A JMSConsumer offers loads of other features
-- We'll just focus to the one we need
+```scala
+class JmsContext(private val context: javax.jms.JMSContext) {
+  // ...
+
+  def createJmsConsumer(queueName: QueueName): Resource[IO, JmsMessageConsumer] =
+    for {
+      destination <- Resource.liftF(createQueue(queueName))
+      consumer <- Resource.fromAutoCloseable(IO.delay(context.createConsumer(destination.wrapped)))
+    } yield new JmsMessageConsumer(consumer)
+}
+```
+
+- a `JmsMessageConsumer` will be only be created by our `JmsContext`, as a `Resource`
+- a `JMSConsumer` offers loads of other features, we'll just focus to the one we need
 
 ---
 
 # Let's write down a working example
 
+```scala
+object SampleConsumer extends IOApp {
+  // an actual JmsContext with an implementation for a specific provider
+  val jmsContextRes: Resource[IO, JmsContext] = ???
+
+  override def run(args: List[String]): IO[ExitCode] = {
+    val jmsConsumerRes = for {
+      jmsContext <- jmsContextRes
+      consumer   <- jmsContext.createJmsConsumer(QueueName("QUEUE1"))
+    } yield consumer
+
+    jmsConsumerRes.use(consumer =>
+      for {
+        msg     <- consumer.receiveJmsMessage
+        textMsg <- IO.fromTry(msg.attemptAsJmsTextMessage)
+        _       <- IO.delay(println(s"Got 1 message with text: $textMsg. Ending now."))
+      } yield ()
+    ).as(ExitCode.Success)
+  }
+}
+```
+
 ---
+
+## Pros:
+- resources get acquired and released in order, the user can't leak them
+- the business logic is made by pure functions
+
+
+## Cons:
+- too low level
+- what if the user is implementing a never-ending message consumer?
+
+---
+
