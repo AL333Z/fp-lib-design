@@ -107,7 +107,7 @@ We'll just put our attention on **_designing a set of APIs_** which wraps an exi
 
 # A look at the beast: sending
 
-```
+```java
 public void sendMessage(ConnectionFactory connectionFactory, 
                         Queue queue, 
                         String text) {
@@ -129,7 +129,7 @@ public void sendMessage(ConnectionFactory connectionFactory,
 
 # A look at the beast: receiving
 
-```
+```java
 public void receiveMessage(ConnectionFactory connectionFactory, Queue queue){
    try (JMSContext context = connectionFactory.createContext();){
       JMSConsumer consumer = session.createConsumer(queue);
@@ -151,7 +151,7 @@ public void receiveMessage(ConnectionFactory connectionFactory, Queue queue){
 
 # A look at the beast: destinations
 
-```
+```java
 public interface Destination { }
 
 public interface Queue extends Destination {
@@ -169,7 +169,7 @@ A simple hierarchy...
 
 # A look at the beast: messages
 
-```
+```java
 public interface Message {
     String getStringProperty(String name) throws JMSException;
     void setStringProperty(String name, String value) throws JMSException;
@@ -232,9 +232,149 @@ Another hierarchy with a set of common ops and type-specific ops
 ---
 
 # Let's start
+## From the lowest level
+### Where the nasty things happen
 
 ---
 
+# Destination
 
+```java
+public interface Destination { }
+
+public interface Queue extends Destination {
+    String getQueueName() throws JMSException;
+}
+
+public interface Topic extends Destination {
+    String getTopicName() throws JMSException;
+}
+```
+
+- Concrete instances never gets created by the user of the lib
+- They are always returned
+- How to keep this invariant?
+
+---
+
+# Destination
+
+```scala
+sealed abstract class JmsDestination {
+  private[lib] val wrapped: javax.jms.Destination
+}
+
+object JmsDestination {
+  class JmsQueue private[lib] (private[lib] val wrapped: javax.jms.Queue) extends JmsDestination
+  class JmsTopic private[lib] (private[lib] val wrapped: javax.jms.Topic) extends JmsDestination
+}
+```
+
+- defining an _abstract class_ which __wraps__ and hides the java counterpart
+- `private[lib]` will make sure users of the lib __can't access java counterparts__
+- `sealed` will __close the domain__ to have only two possible concretions
+- the constructor is private as well, only the lib can call it ✅
+- the only reason we're doing this is that we'll need to pass these around
+
+---
+
+# Message
+
+```java
+public interface Message {
+    String getStringProperty(String name) throws JMSException;
+    void setStringProperty(String name, String value) throws JMSException;
+    // ...
+}
+
+public interface TextMessage extends Message {
+    void setText(String string) throws JMSException;
+    String getText() throws JMSException;
+    // ...
+}
+```
+
+- A hierarchy of possible messages
+- A set of _common operations_
+- Other _type-specific_ operations
+
+---
+
+# Message
+
+```scala
+sealed abstract class JmsMessage private[lib](private[lib] val wrapped: javax.jms.Message) {
+
+  def attemptAsJmsTextMessage: Try[JmsTextMessage] = wrapped match {
+    case textMessage: javax.jms.TextMessage => Success(new JmsTextMessage(textMessage))
+    case _                                  => Failure(UnsupportedMessage(wrapped))
+  }
+
+  val getJMSMessageId: Option[String]                 = Try(Option(wrapped.getJMSMessageID)).toOpt
+  val getJMSTimestamp: Option[Long]                   = Try(Option(wrapped.getJMSTimestamp)).toOpt
+  val getJMSType: Option[String]                      = Try(Option(wrapped.getJMSType)).toOpt
+  def getStringProperty(name: String): Option[String] = Try(Option(wrapped.getStringProperty(name))).toOpt
+
+  def setJMSType(`type`: String): Try[Unit]                     = Try(wrapped.setJMSType(`type`))
+  def setStringProperty(name: String, value: String): Try[Unit] = Try(wrapped.setStringProperty(name, value))
+}
+```
+
+- defining a _sealed abstract class_ which __wraps and hides__ the java counterpart
+- wrapping common operations in order to catch side-effects ✅
+
+---
+
+# messages
+
+```scala
+object JmsMessage {
+  implicit val showJmsMessage: Show[JmsMessage] = Show.show[JmsMessage](/*...a sensible string representation...*/)
+
+  case class UnsupportedMessage(message: javax.jms.Message)
+    extends Exception("Unsupported Message: " + message.show) with NoStackTrace
+
+  class JmsTextMessage private[lib](override private[lib] val wrapped: javax.jms.TextMessage) 
+    extends JmsMessage(wrapped) {
+    
+    def setText(text: String): Try[Unit] = Try(wrapped.setText(text))
+    val getText: Try[String]             = Try(wrapped.getText)
+  }
+
+  // ... other concretions ...
+}
+```
+
+- implementing _all possible concretions_
+- wrapping specific operations in order to catch side-effects ✅
+
+---
+
+# You may think this is boring and useless...
+
+We just wrapped existing java classes
+  - hiding/wrapping side-effects
+  - exposing explicit effect types for failures/optionality
+
+---
+
+# JMSContext
+
+```scala
+class JmsContext(private val context: javax.jms.JMSContext) {
+  val createTextMessage: IO[JmsTextMessage] =     
+    IO.delay(new JmsTextMessage(context.createTextMessage(value)))
+    
+  def createQueue(queue: QueueName): IO[JmsQueue] =     
+    IO.delay(new JmsQueue(context.createQueue(queue.value)))
+  
+  def createTopic(topicName: TopicName): IO[JmsTopic] =     
+    IO.delay(new JmsTopic(context.createTopic(topicName.value)))
+}
+```
+
+- wrapping a bunch of low-level operations (again), leveraging the classes and constructors we already introduced
+- the constructor is public, since the lib should be open to support multiple JMS implementations (e.g. IBM MQ, ActiveMQ, etc...)
+- we're starting to put things together...
 
 ---
