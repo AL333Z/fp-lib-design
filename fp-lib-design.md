@@ -303,7 +303,7 @@ public interface TextMessage extends Message {
 # Message
 
 ```scala
-sealed abstract class JmsMessage private[lib](private[lib] val wrapped: javax.jms.Message) {
+sealed class JmsMessage private[lib](private[lib] val wrapped: javax.jms.Message) {
 
   def attemptAsJmsTextMessage: Try[JmsTextMessage] = wrapped match {
     case textMessage: javax.jms.TextMessage => Success(new JmsTextMessage(textMessage))
@@ -320,12 +320,12 @@ sealed abstract class JmsMessage private[lib](private[lib] val wrapped: javax.jm
 }
 ```
 
-- defining a _sealed abstract class_ which __wraps and hides__ the java counterpart
+- defining a _sealed class_ which __wraps and hides__ the java counterpart
 - wrapping common operations in order to catch side-effects ✅
 
 ---
 
-# messages
+# Message
 
 ```scala
 object JmsMessage {
@@ -350,14 +350,6 @@ object JmsMessage {
 
 ---
 
-# You may think this is boring and useless...
-
-We just wrapped existing java classes
-  - hiding/wrapping side-effects
-  - exposing explicit effect types for failures/optionality
-
----
-
 # JMSContext
 
 ```scala
@@ -376,5 +368,52 @@ class JmsContext(private val context: javax.jms.JMSContext) {
 - wrapping a bunch of low-level operations (again), leveraging the classes and constructors we already introduced
 - the constructor is public, since the lib should be open to support multiple JMS implementations (e.g. IBM MQ, ActiveMQ, etc...)
 - we're starting to put things together...
+
+---
+
+# You may think this is boring and useless...
+
+We just wrapped existing java classes
+  - hiding/wrapping side-effects
+  - exposing explicit effect types for failures/optionality
+  
+---  
+
+# I fell your pain... 
+## You're wondering how to finally consume/produce messages, aren't you?
+
+---
+
+# JMSConsumer
+
+```scala 
+class JmsMessageConsumer private[lib](private[lib] val wrapped: javax.jms.JMSConsumer) {
+
+  val receiveJmsMessage: IO[JmsMessage] =
+    for {
+      recOpt <- IO.delay(Option(wrapped.receiveNoWait()))
+      rec <- recOpt match {
+        case Some(message) => IO.pure(new JmsMessage(message))
+        case None => receiveJmsMessage
+      }
+    } yield rec
+}
+```
+
+- wrapping `JMSConsumer`, hiding all its operations, only exposing an `IO` value which:
+  - _repeats_ the check-and-receive operation till a message is ready
+  - _completes_ the IO with the message read
+  - _cancels_ the computation, if a cancellation gets triggered to the IO (e.g. the application get a `SIGTERM` signal)
+
+---
+
+# JMSConsumer
+
+- A JMSConsumer offers loads of other features
+- We'll just focus to the one we need
+
+---
+
+# Let's write down a working example
 
 ---

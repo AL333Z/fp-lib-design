@@ -7,7 +7,7 @@ import lib.jms.JmsMessage.{JmsTextMessage, UnsupportedMessage}
 import scala.util.control.NoStackTrace
 import scala.util.{Failure, Success, Try}
 
-sealed abstract class JmsMessage private[lib](private[lib] val wrapped: javax.jms.Message) {
+sealed class JmsMessage private[lib](private[lib] val wrapped: javax.jms.Message) {
 
   def attemptAsJmsTextMessage: Try[JmsTextMessage] = wrapped match {
     case textMessage: javax.jms.TextMessage => Success(new JmsTextMessage(textMessage))
