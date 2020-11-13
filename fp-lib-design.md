@@ -365,9 +365,10 @@ class JmsContext(private val context: javax.jms.JMSContext) {
 }
 ```
 
+- `JMSContext` is the root of our interactions with JMS
 - wrapping a bunch of low-level operations (again), leveraging the classes and constructors we already introduced
 - the constructor is public, since the lib should be open to support multiple JMS implementations (e.g. IBM MQ, ActiveMQ, etc...)
-- we're starting to put things together...
+- we'll continue adding more operations as we'll need them
 
 ---
 
@@ -388,22 +389,21 @@ We just wrapped existing java classes
 
 ```scala 
 class JmsMessageConsumer private[lib](private[lib] val wrapped: javax.jms.JMSConsumer) {
-
-  val receiveJmsMessage: IO[JmsMessage] =
+  val receive: IO[JmsMessage] =
     for {
       recOpt <- IO.delay(Option(wrapped.receiveNoWait()))
-      rec <- recOpt match {
+      rec    <- recOpt match {
         case Some(message) => IO.pure(new JmsMessage(message))
-        case None => receiveJmsMessage
+        case None          => receive
       }
     } yield rec
 }
 ```
 
-- wrapping `JMSConsumer`, hiding all its operations, only exposing an `IO` value which:
-  - _repeats_ the check-and-receive operation till a message is ready
+- only exposing `receive`, which is an `IO` value which:
+  - _repeats_ a check-and-receive operation (`receiveNoWait()`) till a message is ready
   - _completes_ the IO with the message read
-  - _cancels_ the computation, if a cancellation gets triggered to the IO (e.g. the application get a `SIGTERM` signal)
+  - _cancels_ the computation, if a cancellation gets triggered (e.g. a `SIGTERM` signal)
 
 ---
 
@@ -412,17 +412,16 @@ class JmsMessageConsumer private[lib](private[lib] val wrapped: javax.jms.JMSCon
 ```scala
 class JmsContext(private val context: javax.jms.JMSContext) {
   // ...
-
   def createJmsConsumer(queueName: QueueName): Resource[IO, JmsMessageConsumer] =
     for {
       destination <- Resource.liftF(createQueue(queueName))
-      consumer <- Resource.fromAutoCloseable(IO.delay(context.createConsumer(destination.wrapped)))
+      consumer    <- Resource.fromAutoCloseable(IO.delay(context.createConsumer(destination.wrapped)))
     } yield new JmsMessageConsumer(consumer)
 }
 ```
 
 - a `JmsMessageConsumer` will be only be created by our `JmsContext`, as a `Resource`
-- a `JMSConsumer` offers loads of other features, we'll just focus to the one we need
+- We're now ready to consume 😎
 
 ---
 
@@ -452,6 +451,33 @@ object SampleConsumer extends IOApp {
 
 ---
 
+# Adding support for a provider (e.g. IBM MQ)
+
+```scala
+object ibmMQ {
+  // ...
+  def makeJmsContext(config: Config): Resource[IO, JmsContext] = {
+    for {
+      context <- Resource.fromAutoCloseable(IO.delay {
+        val connectionFactory: MQConnectionFactory = new MQConnectionFactory()
+        connectionFactory.setTransportType(CommonConstants.WMQ_CM_CLIENT)
+        connectionFactory.setQueueManager(config.qm.value)
+        connectionFactory.setConnectionNameList(hosts(config.endpoints))
+        connectionFactory.setChannel(config.channel.value)
+        connectionFactory.setClientID(config.clientId.value)
+        config.username.map { username => 
+          connectionFactory.createContext(username.value, config.password.map(_.value).getOrElse(""))
+        }.getOrElse(connectionFactory.createContext())
+      })
+    } yield new JmsContext(context)
+  }
+}
+```
+
+This is all we need to know about IBM MQ.
+
+---
+
 ## Pros:
 - resources get acquired and released in order, the user can't leak them
 - the business logic is made by pure functions
@@ -459,7 +485,8 @@ object SampleConsumer extends IOApp {
 
 ## Cons:
 - too low level
-- what if the user is implementing a never-ending message consumer?
+- what if the user needs to implement a never-ending message consumer?
+- concurrency?
 
 ---
 

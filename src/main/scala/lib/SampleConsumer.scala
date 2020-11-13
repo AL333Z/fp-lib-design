@@ -17,7 +17,7 @@ object SampleConsumer extends IOApp {
     jmsConsumerRes
       .use(consumer =>
         for {
-          msg     <- consumer.receiveJmsMessage
+          msg     <- consumer.receive
           textMsg <- IO.fromTry(msg.attemptAsJmsTextMessage)
           _       <- IO.delay(println(s"Got 1 message with text: $textMsg. Ending now."))
         } yield ()
