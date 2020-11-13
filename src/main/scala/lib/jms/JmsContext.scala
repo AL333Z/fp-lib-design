@@ -1,8 +1,8 @@
 package lib.jms
 
-import cats.effect.{IO, Resource}
-import lib.config.DestinationName.{QueueName, TopicName}
-import lib.jms.JmsDestination.{JmsQueue, JmsTopic}
+import cats.effect.{ IO, Resource }
+import lib.config.DestinationName.{ QueueName, TopicName }
+import lib.jms.JmsDestination.{ JmsQueue, JmsTopic }
 import lib.jms.JmsMessage.JmsTextMessage
 
 class JmsContext(private val context: javax.jms.JMSContext) {
@@ -19,6 +19,6 @@ class JmsContext(private val context: javax.jms.JMSContext) {
   def createJmsConsumer(queueName: QueueName): Resource[IO, JmsMessageConsumer] =
     for {
       destination <- Resource.liftF(createQueue(queueName))
-      consumer <- Resource.fromAutoCloseable(IO.delay(context.createConsumer(destination.wrapped)))
+      consumer    <- Resource.fromAutoCloseable(IO.delay(context.createConsumer(destination.wrapped)))
     } yield new JmsMessageConsumer(consumer)
 }
