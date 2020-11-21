@@ -197,16 +197,16 @@ Another hierarchy with a set of common ops and type-specific ops
 
 - JMS is really more than that
 - JMS 2.0 brought in more goodies
-- For this session we'll just need to focus on these, which is just a subset
+- For this session we'll just need to focus on these, which is only a subset
 
 ---
 
 # What's wrong with these APIs?
 
-- they're imperative, but you can actually live with that
+- they're _imperative_, but you can actually live with that
 - unchecked exceptions everywhere
 - side-effects everywhere
-- low-level in terms of how to build complete programs
+- _low-level_ in terms of how to build complete programs
 
 ---
 
@@ -222,7 +222,7 @@ Another hierarchy with a set of common ops and type-specific ops
 
 - having all __effects__ explicitly marked in the types
 - properly handle __resource__ acquisition/dispose
-- avoid the client (the developer using our lib) to mess with the APIs
+- __prevent__ the developer using our lib from doing __wrong things__
 - offering a __high-level__ set of APIs
 
 ---
@@ -233,7 +233,12 @@ Another hierarchy with a set of common ops and type-specific ops
 
 # Let's start
 ## From the lowest level
-### Where the nasty things happen
+
+---
+
+# Don't forget the basics
+
+![inline](pics/gap.png)
 
 ---
 
@@ -321,7 +326,7 @@ sealed class JmsMessage private[lib](private[lib] val wrapped: javax.jms.Message
 ```
 
 - defining a _sealed class_ which __wraps and hides__ the java counterpart
-- wrapping common operations in order to catch side-effects ✅
+- wrapping common operations in order to catch exceptions ✅
 
 ---
 
@@ -346,7 +351,7 @@ object JmsMessage {
 ```
 
 - implementing _all possible concretions_
-- wrapping specific operations in order to catch side-effects ✅
+- wrapping specific operations in order to catch exceptions ✅
 
 ---
 
@@ -375,7 +380,7 @@ class JmsContext(private val context: javax.jms.JMSContext) {
 # You may think this is boring and useless...
 
 We just wrapped existing java classes
-  - hiding/wrapping side-effects
+  - catching/wrapping side-effects
   - exposing explicit effect types for failures/optionality
   
 ---  
@@ -393,9 +398,9 @@ class JmsMessageConsumer private[lib](private[lib] val wrapped: javax.jms.JMSCon
     for {
       recOpt <- IO.delay(Option(wrapped.receiveNoWait()))
       rec    <- recOpt match {
-        case Some(message) => IO.pure(new JmsMessage(message))
-        case None          => receive
-      }
+                  case Some(message) => IO.pure(new JmsMessage(message))
+                  case None          => receive
+                }
     } yield rec
 }
 ```
@@ -484,7 +489,7 @@ This is all we need to know about IBM MQ.
 
 
 ## Cons:
-- too low level
+- still low level
 - what if the user needs to implement a never-ending message consumer?
 - concurrency?
 
