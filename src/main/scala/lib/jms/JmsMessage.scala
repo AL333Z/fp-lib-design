@@ -9,21 +9,21 @@ import scala.util.{ Failure, Success, Try }
 
 sealed class JmsMessage private[lib] (private[lib] val wrapped: javax.jms.Message) {
 
-  def attemptAsJmsTextMessage: Try[JmsTextMessage] = wrapped match {
+  def tryAsJmsTextMessage: Try[JmsTextMessage] = wrapped match {
     case textMessage: javax.jms.TextMessage => Success(new JmsTextMessage(textMessage))
     case _                                  => Failure(UnsupportedMessage(wrapped))
   }
 
-  val getJMSMessageId: Option[String] = Try(Option(wrapped.getJMSMessageID)).toOpt
-  val getJMSTimestamp: Option[Long]   = Try(Option(wrapped.getJMSTimestamp)).toOpt
-  val getJMSType: Option[String]      = Try(Option(wrapped.getJMSType)).toOpt
+  val getJMSMessageId: Option[String]                 = getOpt(wrapped.getJMSMessageID)
+  val getJMSTimestamp: Option[Long]                   = getOpt(wrapped.getJMSTimestamp)
+  val getJMSType: Option[String]                      = getOpt(wrapped.getJMSType)
+  def getStringProperty(name: String): Option[String] = getOpt(wrapped.getStringProperty(name))
 
-  def getStringProperty(name: String): Option[String] =
-    Try(Option(wrapped.getStringProperty(name))).toOpt
-
-  def setJMSType(`type`: String): Try[Unit] = Try(wrapped.setJMSType(`type`))
-
+  def setJMSType(`type`: String): Try[Unit]                     = Try(wrapped.setJMSType(`type`))
   def setStringProperty(name: String, value: String): Try[Unit] = Try(wrapped.setStringProperty(name, value))
+
+  private def getOpt[A](body: => A): Option[A] =
+    Try(Option(body)).toOpt
 
   implicit class TryUtils[T](val underlying: Try[Option[T]]) {
 

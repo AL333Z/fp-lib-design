@@ -27,10 +27,6 @@ autoscale: true
 
 ---
 
-# I disagree
-
----
-
 # Agenda
 
 - A reference library to wrap
@@ -41,13 +37,21 @@ autoscale: true
 
 ---
 
+# Goals
+
+// TODO
+
+- bottom-up approach
+
+---
+
 # A reference library
 
 __Java Message Service__ a.k.a. JMS
 
 - provides generic messaging models
 - able to handle the producer–consumer problem
-- can be used to facilitate the sending and receiving of messages between software systems
+- can be used to facilitate the sending and receiving of messages between enterprise software systems, whatever it means enterprise!
 
 ---
 # JMS main elements
@@ -57,7 +61,7 @@ __Java Message Service__ a.k.a. JMS
 - __Consumer__/__Subscriber__: a client that receives messages
 - __Message__: a object that contains the data being transferred
 - __Queue__: a buffer that contains messages sent and waiting to be read
-- __Topic__: a mechanism for sending messages that are delivered to multiple subscribers
+- __Topic__: a mechanism for sending messages that are potentialy delivered to multiple subscribers
 
 ---
 
@@ -66,38 +70,18 @@ __Java Message Service__ a.k.a. JMS
 - ~~old~~ stable enough (born in 1998, latest revision in 2015)
 - its apis are a __good testbed for sketching a purely functional wrapper__
   - loads of state, side-effects, exceptions, ...
-- found pretty much nothing about
+- found pretty much nothing about (no FP-like bindings...)
 - I don't like suffering to much while working
 
 ---
 
 # Disclaimer
 
-Our focus here is **_NOT_** on building the coolest library doing the coolest thing ever
+Our focus here is **_NOT_** on building the coolest library doing the coolest thing ever.
 
 Chances are that you'll never use JMS at all!
 
-We'll just put our attention on **_designing a set of APIs_** which wraps an existing non-functional lib, using Pure Functional Programming in Scala
-
----
-
-# Why Scala
-
----
-
-# Why Scala
-
-## _I know Scala_
-
----
-
-# Why Scala
-
-- rich set of features which let us code using pure functional programming without any frills: 
-  - immutability, ADTs, pattern matching
-  - higher-kinded types
-  - type classes
-- __mature and complete ecosystem__ of FP libs (cats, cats-effects, fs2, etc..)
+We'll just put our attention on **_designing a set of APIs_** which wraps an existing lib written in the _good old imperative way_, using Pure Functional Programming and the Typelevel stack.
 
 ---
 
@@ -105,33 +89,12 @@ We'll just put our attention on **_designing a set of APIs_** which wraps an exi
 
 ---
 
-# A look at the beast: sending
-
-```java
-public void sendMessage(ConnectionFactory connectionFactory, 
-                        Queue queue, 
-                        String text) {
-   try (JMSContext context = connectionFactory.createContext();){
-      Message msg = context.createTextMessage(text);
-      context.createProducer().send(queue, msg);
-   } catch (JMSRuntimeException ex) {
-      // ...
-   }
-}
-```
-
-- `JMSContext` is in charge of _opening low level stuff_ (connections, sessions, ...), implements `AutoClosable` (see the try-with-resources block)
-- `JMSProducer` is a lightweight abstraction which allows sending messages:
-  - `JMSProducer send(Destination destination, Message message)` sends the message to the given destination (returning the `JMSProducer` instance, because of method chaining)
-- `JMSRuntimeException` is an _unchecked exception_
-
----
-
 # A look at the beast: receiving
 
 ```java
-public void receiveMessage(ConnectionFactory connectionFactory, Queue queue){
+public void receiveMessage(ConnectionFactory connectionFactory, String queueName){
    try (JMSContext context = connectionFactory.createContext();){
+      Queue queue = conxtex.createQueue(queueName);
       JMSConsumer consumer = session.createConsumer(queue);
       Message msg = consumer.receive();
       // ...
@@ -141,11 +104,15 @@ public void receiveMessage(ConnectionFactory connectionFactory, Queue queue){
 }
 ```
 
+---
+
+- `JMSContext` is in charge of _opening low level stuff_ (connections, sessions, ...), implements `AutoClosable` (see the try-with-resources block)
 - `JMSConsumer` is in charge of receiving messages, via:
   - `Message receive()` will block indefinitely
   - `Message receive(long timeout)` will block up to a timeout
   - `Message receiveNoWait()` receives the next message if one is immediately available
   - other variants...
+- `JMSRuntimeException` is an _unchecked exception_
   
 ---
 
@@ -197,15 +164,15 @@ Another hierarchy with a set of common ops and type-specific ops
 
 - JMS is really more than that
 - JMS 2.0 brought in more goodies
-- For this session we'll just need to focus on these, which is only a subset
+- For this session we'll just need to focus on these, which is only a relevant subset
 
 ---
 
 # What's wrong with these APIs?
 
-- they're _imperative_, but you can actually live with that
-- unchecked exceptions everywhere
-- side-effects everywhere
+- not really composable:
+  - unchecked exceptions everywhere
+  - side-effects everywhere
 - _low-level_ in terms of how to build complete programs
 
 ---
@@ -214,15 +181,15 @@ Another hierarchy with a set of common ops and type-specific ops
 
 - wrapping side-effects and methods which throws
 - understand what are the core-feature we want to expose
-- evaluate what is the design which better supports our intent
+- evaluate what is the __design which better supports our intent__
 
 ---
 
 # Our intent
 
 - having all __effects__ explicitly marked in the types
-- properly handle __resource__ acquisition/dispose
-- __prevent__ the developer using our lib from doing __wrong things__
+- properly handle __resource__ acquisition/dispose (avoiding leaks!)
+- __prevent__ the developer using our lib from doing __wrong things__ (e.g. unconfirmed messages, deadlocks, etc...) by design
 - offering a __high-level__ set of APIs
 
 ---
@@ -250,10 +217,7 @@ public interface Destination { }
 public interface Queue extends Destination {
     String getQueueName() throws JMSException;
 }
-
-public interface Topic extends Destination {
-    String getTopicName() throws JMSException;
-}
+// ...
 ```
 
 - Concrete instances never gets created by the user of the lib
@@ -270,16 +234,16 @@ sealed abstract class JmsDestination {
 }
 
 object JmsDestination {
-  class JmsQueue private[lib] (private[lib] val wrapped: javax.jms.Queue) extends JmsDestination
-  class JmsTopic private[lib] (private[lib] val wrapped: javax.jms.Topic) extends JmsDestination
+  class JmsQueue private[lib] (private[lib] val wrapped: javax.jms.Queue) 
+    extends JmsDestination
+  // ...
 }
 ```
 
 - defining an _abstract class_ which __wraps__ and hides the java counterpart
 - `private[lib]` will make sure users of the lib __can't access java counterparts__
-- `sealed` will __close the domain__ to have only two possible concretions
+- `sealed` will __close the domain__ to have only the defined possible concretions
 - the constructor is private as well, only the lib can call it ✅
-- the only reason we're doing this is that we'll need to pass these around
 
 ---
 
@@ -309,24 +273,26 @@ public interface TextMessage extends Message {
 
 ```scala
 sealed class JmsMessage private[lib](private[lib] val wrapped: javax.jms.Message) {
-
-  def attemptAsJmsTextMessage: Try[JmsTextMessage] = wrapped match {
+  def tryAsJmsTextMessage: Try[JmsTextMessage] = wrapped match {
     case textMessage: javax.jms.TextMessage => Success(new JmsTextMessage(textMessage))
-    case _                                  => Failure(UnsupportedMessage(wrapped))
+    // others...
+    case _ => Failure(UnsupportedMessage(wrapped))
   }
 
-  val getJMSMessageId: Option[String]                 = Try(Option(wrapped.getJMSMessageID)).toOpt
-  val getJMSTimestamp: Option[Long]                   = Try(Option(wrapped.getJMSTimestamp)).toOpt
-  val getJMSType: Option[String]                      = Try(Option(wrapped.getJMSType)).toOpt
-  def getStringProperty(name: String): Option[String] = Try(Option(wrapped.getStringProperty(name))).toOpt
+  val getJMSMessageId: Option[String] = getOpt(wrapped.getJMSMessageID)
+  val getJMSTimestamp: Option[Long]   = getOpt(wrapped.getJMSTimestamp)
+  val getJMSType: Option[String]      = getOpt(wrapped.getJMSType)
+  def getStringProperty(name: String): Option[String] = getOpt(wrapped.getStringProperty(name))
 
-  def setJMSType(`type`: String): Try[Unit]                     = Try(wrapped.setJMSType(`type`))
+  def setJMSType(`type`: String): Try[Unit] = Try(wrapped.setJMSType(`type`))
   def setStringProperty(name: String, value: String): Try[Unit] = Try(wrapped.setStringProperty(name, value))
+
+  private def getOpt[A](body: => A): Option[A] = // ...
 }
 ```
 
 - defining a _sealed class_ which __wraps and hides__ the java counterpart
-- wrapping common operations in order to catch exceptions ✅
+- exposing a safer variant of its operations ✅
 
 ---
 
@@ -355,52 +321,305 @@ object JmsMessage {
 
 ---
 
-# JMSContext
-
-```scala
-class JmsContext(private val context: javax.jms.JMSContext) {
-  val createTextMessage: IO[JmsTextMessage] =     
-    IO.delay(new JmsTextMessage(context.createTextMessage(value)))
-    
-  def createQueue(queue: QueueName): IO[JmsQueue] =     
-    IO.delay(new JmsQueue(context.createQueue(queue.value)))
-  
-  def createTopic(topicName: TopicName): IO[JmsTopic] =     
-    IO.delay(new JmsTopic(context.createTopic(topicName.value)))
-}
-```
-
-- `JMSContext` is the root of our interactions with JMS
-- wrapping a bunch of low-level operations (again), leveraging the classes and constructors we already introduced
-- the constructor is public, since the lib should be open to support multiple JMS implementations (e.g. IBM MQ, ActiveMQ, etc...)
-- we'll continue adding more operations as we'll need them
-
----
-
 # You may think this is boring and useless...
 
 We just wrapped existing java classes
-  - catching/wrapping side-effects
-  - exposing explicit effect types for failures/optionality
-  
----  
 
-# I fell your pain... 
-## You're wondering how to finally consume/produce messages, aren't you?
+  - catching/wrapping side-effects
+  - and exposing explicit effect types for failures/optionality
+  
+## Hold on...
+
+---
+
+# Receiving
+
+```java
+public void receiveMessage(ConnectionFactory connectionFactory, String queueName){
+   try (JMSContext context = connectionFactory.createContext();){
+      Queue queue = conxtex.createQueue(queueName);
+      JMSConsumer consumer = session.createConsumer(queue);
+      Message msg = consumer.receive();
+      // ...
+   } catch (JMSRuntimeException ex) {
+      // ...
+   }
+}
+```
+
+- how to handle JMSRuntimeException?
+- how to build a consumer that can be injected in our application components?
+- how to handle the resource lifecycle?
+
+---
+
+# Let's see how FP con help us in doing the right thing!
+
+---
+
+# Introducing IO
+#### A data type for **encoding effects** as pure values
+
+---
+
+# Introducing IO
+
+- enable capturing and controlling actions - a.k.a _effects_ - that your program _wishes to perform_ within a _resource-safe_, _typed_ context with seamless support for _concurrency_ and _coordination_
+- these effects may be _asynchronous_ (callback-driven) or _synchronous_ (directly returning values); they may _return_ within microseconds or run _infinitely_.
+
+---
+
+# IO values
+
+- are *pure* and *immutable*
+- represents just a description of a *side effectful computation*
+- are not evaluated (_suspended_) until the **end of the world**
+- respects _referential transparency_
+
+---
+
+# IO and combinators
+
+[.column]
+
+[.code-highlight: none]
+[.code-highlight: all]
+
+```scala
+object IO {
+  def delay[A](a: => A): IO[A]
+  def pure[A](a: A): IO[A]
+  def raiseError[A](e: Throwable): IO[A]
+  def sleep(duration: FiniteDuration): IO[Unit]
+  def async[A](k: /* ... */): IO[A]
+  ...
+}
+```
+
+[.column]
+
+[.code-highlight: none]
+[.code-highlight: all]
+
+```scala
+class IO[A] {
+  def map[B](f: A => B): IO[B]
+  def flatMap[B](f: A => IO[B]): IO[B]
+  def *>[B](fb: IO[B]): IO[B]
+  ...
+}
+```
+
+---
+
+# Composing sequential effects
+
+[.column]
+[.code-highlight: 1-4]
+[.code-highlight: 7-8]
+[.code-highlight: 7-9]
+[.code-highlight: 7-11]
+[.code-highlight: 7-12]
+[.code-highlight: all]
+
+```scala
+val ioInt: IO[Int] = 
+  IO.delay { println("hello") }
+    .map(_ => 1)
+
+val program: IO[Unit] =
+ for {
+    i1 <- ioInt
+    _  <- IO.sleep(i1.second)
+    _  <- IO.raiseError( // not throwing!
+            new RuntimeException("boom!")) 
+    i2 <- ioInt //comps is short-circuted
+ } yield ()
+```
+[.column]
+[.code-highlight: none]
+[.code-highlight: all]
+```
+> Output:
+> hello
+> <...1 second...>
+> RuntimeException: boom!
+```
+
+---
+
+# How IO values are executed?
+
+If IO values are just a description of _effectful computations_ which can be composed and so on... 
+
+Who's gonna **_run_** the suspended computation then?
+
+---
+
+[.background-color: #FFFFFF]
+
+# How to fill the abstraction gap?
+
+![Inline](pics/io.png)
+
+---
+
+# JmsContext - first iteration
+
+```scala
+class JmsContext(private val context: javax.jms.JMSContext) {
+  def createQueue(queue: QueueName): IO[JmsQueue] =
+    IO.delay(new JmsQueue(context.createQueue(queue.value)))
+
+  def makeJmsConsumer(queueName: QueueName): IO[JmsMessageConsumer] =
+    for {
+      destination <- createQueue(queueName)
+      consumer    <- IO.delay(context.createConsumer(destination.wrapped))
+    } yield new JmsMessageConsumer(consumer)
+}
+```
+
+- handle JMSRuntimeException ✅
+- build a consumer that can be injected in our application components ✅
+- handle the resource lifecycle ❌ 
+
+---
+
+# How to handle the lifecycle of a resource?
+
+---
+
+# Introducing Resource
+
+#### Effectfully allocates and releases a resource
+
+---
+
+# Extremely helpful to write code that:
+- doesn't leak
+- handles properly terminal signals (e.g. `SIGTERM`) by default (no need to register a shutdown hook)
+- do _the right thing_<sup>TM</sup> by design
+- avoid the need to reboot a container every once in a while :)
+
+---
+
+[.background-color: #FFFFFF]
+
+# How to fill the abstraction gap?
+
+![Inline](pics/resource.png)
+
+---
+
+[.code-highlight: 1-5]
+[.code-highlight: 7-13]
+[.code-highlight: all]
+
+# Introducing Resource
+
+```scala
+object Resource {
+  def make[A](
+    acquire: IO[A])(
+    release: A => IO[Unit]): Resource[A]
+}
+
+class Resource[A] {
+  def use[B](f: A => IO[B]): IO[B]
+
+  def map[B](f: A => B): Resource[B]
+  def flatMap[B](f: A => Resource[B]): Resource[B]
+  ...
+}
+```
+
+[.footer: NB: not actual code, just a simplification sticking with IO type]
+^ A note on the simplification
+
+---
+
+# Using a Resource
+
+[.column]
+
+```scala
+val sessionPool: Resource[MySessionPool] = 
+  for {
+    connection <- openConnection()
+    sessions   <- openSessionPool(connection)
+  } yield sessions
+
+sessionPool.use { sessions =>
+  // use sessions to do whatever things!
+}
+```
+
+[.column]
+
+[.code-highlight: none]
+[.code-highlight: all]
+
+```
+Output:
+> Acquiring connection
+> Acquiring sessions
+> Using sessions
+> Releasing sessions
+> Releasing connection
+```
+
+---
+
+# Gotchas:
+- _Nested resources_ are released in *reverse order* of acquisition 
+- Easy to _lift_ an `AutoClosable` to `Resource`, via `Resource.fromAutoclosable`
+- Every time you need to use something which implements `AutoClosable`, you should really be using `Resource`!
+- You can _lift_ any `IO[A]` into a `Resource[A]` with a no-op release via `Resource.eval`
+
+---
+
+# Why not scala.util.Using?
+
+- not composable (no `map`, `flatMap`, etc...)
+- no support for properly handling effects
+
+---
+
+# JmsContext - second iteration
+
+```scala
+class JmsContext(private val context: javax.jms.JMSContext) {
+
+  def createQueue(queue: QueueName): IO[JmsQueue] =
+    IO.delay(new JmsQueue(context.createQueue(queue.value)))
+
+  def makeJmsConsumer(queueName: QueueName): Resource[IO, JmsMessageConsumer] =
+    for {
+      destination <- Resource.eval(createQueue(queueName))
+      consumer    <- Resource.fromAutoCloseable(IO.delay(context.createConsumer(destination.wrapped)))
+    } yield new JmsMessageConsumer(consumer)
+}
+```
+
+- handle JMSRuntimeException ✅
+- build a consumer that can be injected in our application components ✅
+- handle the resource lifecycle ✅
 
 ---
 
 # JMSConsumer
 
 ```scala 
-class JmsMessageConsumer private[lib](private[lib] val wrapped: javax.jms.JMSConsumer) {
+class JmsMessageConsumer private[lib] (
+  private[lib] val wrapped: javax.jms.JMSConsumer
+) {
   val receive: IO[JmsMessage] =
     for {
       recOpt <- IO.delay(Option(wrapped.receiveNoWait()))
-      rec    <- recOpt match {
-                  case Some(message) => IO.pure(new JmsMessage(message))
-                  case None          => receive
-                }
+      rec <- recOpt match {
+        case Some(message) => IO.pure(new JmsMessage(message))
+        case None          => receive
+      }
     } yield rec
 }
 ```
@@ -412,47 +631,81 @@ class JmsMessageConsumer private[lib](private[lib] val wrapped: javax.jms.JMSCon
 
 ---
 
-# JMSConsumer
+# JMSConsumer - alternative implementation
 
-```scala
-class JmsContext(private val context: javax.jms.JMSContext) {
-  // ...
-  def createJmsConsumer(queueName: QueueName): Resource[IO, JmsMessageConsumer] =
+```scala 
+class JmsMessageConsumer private[lib] (
+  private[lib] val wrapped: javax.jms.JMSConsumer,
+  private[lib] val pollingInterval: FiniteDuration
+) {
+
+  val receive: IO[JmsMessage] =
     for {
-      destination <- Resource.liftF(createQueue(queueName))
-      consumer    <- Resource.fromAutoCloseable(IO.delay(context.createConsumer(destination.wrapped)))
-    } yield new JmsMessageConsumer(consumer)
+      recOpt <- IO.blocking(Option(wrapped.receive(pollingInterval.toMillis)))
+      rec <- recOpt match {
+        case Some(message) => IO.pure(new JmsMessage(message))
+        case None          => receive
+      }
+    } yield rec
 }
 ```
 
-- a `JmsMessageConsumer` will be only be created by our `JmsContext`, as a `Resource`
-- We're now ready to consume 😎
+- pretty much the same as the former two
+- leveraging `receive(timeout)` and wrapping the blocking operation in `IO.blocking`
 
 ---
 
-# Let's write down a working example
+# JMSConsumer - final
+
+```scala 
+class JmsMessageConsumer private[lib] (
+  private[lib] val wrapped: JMSConsumer,
+  private[lib] val pollingInterval: FiniteDuration
+) {
+
+  val receive: IO[JmsMessage] =
+    for {
+      recOpt <- IO.delay(Option(wrapped.receiveNoWait()))
+      rec <- recOpt match {
+        case Some(message) => IO.pure(new JmsMessage(message))
+        case None          => IO.cede >> IO.sleep(pollingInterval) >> receive
+      }
+    } yield rec
+}
+```
+
+- pretty much the same as the former two
+- assumes `receiveNoWait()` is not actually blocking
+- introduce a fairness boundary via `IO.cede`, forcing the runtime to progress with other tasks if no message has been found ready to consume
+- introduce an interval in order to avoid an high cpu usage when the queue has no messages for a long time
+
+---
+
+# Let's write down a nearly working example
 
 ```scala
-object SampleConsumer extends IOApp {
-  // an actual JmsContext with an implementation for a specific provider
-  val jmsContextRes: Resource[IO, JmsContext] = ???
-
-  override def run(args: List[String]): IO[ExitCode] = {
+object SampleConsumer extends IOApp.Simple {
+  override def run: IO[Unit] = {
     val jmsConsumerRes = for {
-      jmsContext <- jmsContextRes
-      consumer   <- jmsContext.createJmsConsumer(QueueName("QUEUE1"))
+      jmsContext <- ??? // A Resource[JmsContext] instance for a given provider
+      consumer   <- jmsContext.makeJmsConsumer(QueueName("QUEUE1"))
     } yield consumer
 
-    jmsConsumerRes.use(consumer =>
-      for {
-        msg     <- consumer.receiveJmsMessage
-        textMsg <- IO.fromTry(msg.attemptAsJmsTextMessage)
-        _       <- IO.delay(println(s"Got 1 message with text: $textMsg. Ending now."))
-      } yield ()
-    ).as(ExitCode.Success)
+    jmsConsumerRes
+      .use(consumer =>
+        for {
+          msg     <- consumer.receive
+          textMsg <- IO.fromTry(msg.tryAsJmsTextMessage)
+          _       <- IO.delay(println(s"Got 1 message with text: $textMsg. Ending now."))
+        } yield ()
+      )
   }
 }
 ```
+
+- `IOApp` describes a _main_ which executes an `IO` (a.k.a. *End of the world*)
+- It runs the side-effects described in the `IO`!
+- It's the single _entry point_ to a **pure** program.
 
 ---
 
@@ -469,17 +722,14 @@ object ibmMQ {
         connectionFactory.setQueueManager(config.qm.value)
         connectionFactory.setConnectionNameList(hosts(config.endpoints))
         connectionFactory.setChannel(config.channel.value)
-        connectionFactory.setClientID(config.clientId.value)
-        config.username.map { username => 
-          connectionFactory.createContext(username.value, config.password.map(_.value).getOrElse(""))
-        }.getOrElse(connectionFactory.createContext())
+        // ...
       })
     } yield new JmsContext(context)
   }
 }
 ```
 
-This is all we need to know about IBM MQ.
+That's it!
 
 ---
 
@@ -490,8 +740,90 @@ This is all we need to know about IBM MQ.
 
 ## Cons:
 - still low level
+- how to specify message acknoledgements?
 - what if the user needs to implement a never-ending message consumer?
 - concurrency?
 
 ---
 
+# Switching to top-down
+
+- Let's evaluate how we can model an api for a never-ending message consumer!
+
+---
+
+# Consumer with explicit ack - first iteration
+
+[.column]
+
+```scala
+object JmsAcknowledgerConsumer {
+
+  sealed trait AckResult
+  object AckResult {
+    // ack all the messages delivered by this context
+    case object Ack  extends AckResult
+    // do nothing, messages may be redelivered
+    case object NAck extends AckResult
+  }
+
+  type Acker    = AckResult => IO[Unit]
+  type Consumer = Stream[IO, JmsMessage]
+
+  def make(
+    context: JmsContext, 
+    queueName: QueueName
+  ): Resource[IO, (Consumer, Acker)] =
+    for {
+      ctx <- context.makeContextForAcknowledging
+      acker = (ackResult: AckResult) =>
+        ackResult match {
+          case AckResult.Ack  => IO.blocking(ctx.context.acknowledge())
+          case AckResult.NAck => IO.unit
+        }
+      consumer <- ctx.makeJmsConsumer(queueName)
+    } yield (Stream.eval(consumer.receive).repeat, acker)
+}
+
+```
+
+[.column]
+
+```scala
+object SampleJmsAcknowledgerConsumer extends IOApp.Simple {
+
+  val logger = ???
+  val jmsContextRes: Resource[IO, JmsContext] = ???
+
+  override def run: IO[Unit] =
+    jmsContextRes.flatMap(ctx => 
+      JmsAcknowledgerConsumer.make(ctx, QueueName("QUEUE1"))).use {
+        case (consumer, acker) =>
+          consumer.evalMap { msg =>
+            // whatever business logic you need to perform
+            logger.info(msg.show) >>
+              acker(AckResult.Ack)
+          }.compile.drain
+    }
+}
+```
+
+- Inspired by fs2-rabbit
+
+---
+
+# Consumer with explicit ack - first iteration
+
+- all effects are expressed in the types (`IO`, etc...)
+- resource lifecycle handled via `Resource`
+- messages in the queue are exposed via a `Stream`
+
+But...
+
+- what happens if the user messes with our lib?
+  - the user forget to `ack`/`nack`
+  - the user `ack`/`nack` multiple times the same message
+  - the user `ack` and then `nack` the same message (or viceversa)
+- concurrency?
+
+---
