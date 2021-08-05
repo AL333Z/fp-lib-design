@@ -784,7 +784,6 @@ object JmsAcknowledgerConsumer {
       consumer <- ctx.makeJmsConsumer(queueName)
     } yield (Stream.eval(consumer.receive).repeat, acker)
 }
-
 ```
 
 [.column]
@@ -814,16 +813,82 @@ object SampleJmsAcknowledgerConsumer extends IOApp.Simple {
 
 # Consumer with explicit ack - first iteration
 
-- all effects are expressed in the types (`IO`, etc...)
-- resource lifecycle handled via `Resource`
-- messages in the queue are exposed via a `Stream`
+[.column]
+
+- all effects are expressed in the types (`IO`, etc...) ✅
+- resource lifecycle handled via `Resource` ✅
+- messages in the queue are exposed via a `Stream` ✅
+
+[.column]
+
+```scala
+object JmsAcknowledgerConsumer {
+
+  sealed trait AckResult
+  object AckResult {
+    // ack all the messages delivered by this context
+    case object Ack  extends AckResult
+    // do nothing, messages may be redelivered
+    case object NAck extends AckResult
+  }
+
+  type Acker    = AckResult => IO[Unit]
+  type Consumer = Stream[IO, JmsMessage]
+
+  def make(
+    context: JmsContext, 
+    queueName: QueueName
+  ): Resource[IO, (Consumer, Acker)] =
+    for {
+      ctx <- context.makeContextForAcknowledging
+      acker = (ackResult: AckResult) =>
+        ackResult match {
+          case AckResult.Ack  => IO.blocking(ctx.context.acknowledge())
+          case AckResult.NAck => IO.unit
+        }
+      consumer <- ctx.makeJmsConsumer(queueName)
+    } yield (Stream.eval(consumer.receive).repeat, acker)
+}
+```
+
+---
+
+# Consumer with explicit ack - first iteration
+
+[.column]
 
 But...
 
 - what happens if the user messes with our lib?
-  - the user forget to `ack`/`nack`
-  - the user `ack`/`nack` multiple times the same message
-  - the user `ack` and then `nack` the same message (or viceversa)
-- concurrency?
+  - the client forget to `ack`/`nack`
+  - the client `ack`/`nack` multiple times the same message
+  - the client evaluates the stream multiple times 
+- how to support concurrency?
+
+[.column]
+
+```scala
+object SampleJmsAcknowledgerConsumer extends IOApp.Simple {
+
+  val logger = ???
+  val jmsContextRes: Resource[IO, JmsContext] = ???
+
+  override def run: IO[Unit] =
+    jmsContextRes.flatMap(ctx => 
+      JmsAcknowledgerConsumer.make(ctx, QueueName("QUEUE1"))).use {
+        case (consumer, acker) =>
+          consumer.evalMap { msg =>
+            // whatever business logic you need to perform
+            logger.info(msg.show) >>
+              acker(AckResult.Ack)
+          }.compile.drain
+    }
+}
+```
 
 ---
+
+# Can we do better?
+
+---
+
