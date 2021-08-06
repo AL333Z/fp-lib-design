@@ -1,17 +1,14 @@
 package lib
 
-import cats.effect.{ IO, IOApp, Resource }
-import lib.config.DestinationName.QueueName
-import lib.jms.JmsContext
+import cats.effect.{ IO, IOApp }
+import lib.DemoUtils._
 
 object SampleConsumer extends IOApp.Simple {
-  // an actual JmsContext with an implementation for a specific provider
-  val jmsContextRes: Resource[IO, JmsContext] = null
 
   override def run: IO[Unit] = {
     val jmsConsumerRes = for {
       jmsContext <- jmsContextRes
-      consumer   <- jmsContext.makeJmsConsumer(QueueName("QUEUE1"))
+      consumer   <- jmsContext.makeJmsConsumer(queueName)
     } yield consumer
 
     jmsConsumerRes
@@ -19,7 +16,7 @@ object SampleConsumer extends IOApp.Simple {
         for {
           msg     <- consumer.receive
           textMsg <- IO.fromTry(msg.tryAsJmsTextMessage)
-          _       <- IO.delay(println(s"Got 1 message with text: $textMsg. Ending now."))
+          _       <- logger.info(s"Got 1 message with text: $textMsg. Ending now.")
         } yield ()
       )
   }

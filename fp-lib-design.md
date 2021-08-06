@@ -1,6 +1,6 @@
 autoscale: true
 
-## Sketching a library APIs with Functional Programming
+## How to turn an API into Functional Programming
 
 ### _Lessons learned while filling the gap_
 
@@ -688,7 +688,7 @@ object SampleConsumer extends IOApp.Simple {
   override def run: IO[Unit] = {
     val jmsConsumerRes = for {
       jmsContext <- ??? // A Resource[JmsContext] instance for a given provider
-      consumer   <- jmsContext.makeJmsConsumer(QueueName("QUEUE1"))
+      consumer   <- jmsContext.makeJmsConsumer(queueName)
     } yield consumer
 
     jmsConsumerRes
@@ -696,7 +696,7 @@ object SampleConsumer extends IOApp.Simple {
         for {
           msg     <- consumer.receive
           textMsg <- IO.fromTry(msg.tryAsJmsTextMessage)
-          _       <- IO.delay(println(s"Got 1 message with text: $textMsg. Ending now."))
+          _       <- logger.info(s"Got 1 message with text: $textMsg. Ending now.")
         } yield ()
       )
   }
@@ -791,12 +791,9 @@ object JmsAcknowledgerConsumer {
 ```scala
 object SampleJmsAcknowledgerConsumer extends IOApp.Simple {
 
-  val logger = ???
-  val jmsContextRes: Resource[IO, JmsContext] = ???
-
   override def run: IO[Unit] =
     jmsContextRes.flatMap(ctx => 
-      JmsAcknowledgerConsumer.make(ctx, QueueName("QUEUE1"))).use {
+      JmsAcknowledgerConsumer.make(ctx, queueName)).use {
         case (consumer, acker) =>
           consumer.evalMap { msg =>
             // whatever business logic you need to perform
@@ -870,12 +867,9 @@ But...
 ```scala
 object SampleJmsAcknowledgerConsumer extends IOApp.Simple {
 
-  val logger = ???
-  val jmsContextRes: Resource[IO, JmsContext] = ???
-
   override def run: IO[Unit] =
     jmsContextRes.flatMap(ctx => 
-      JmsAcknowledgerConsumer.make(ctx, QueueName("QUEUE1"))).use {
+      JmsAcknowledgerConsumer.make(ctx, queueName)).use {
         case (consumer, acker) =>
           consumer.evalMap { msg =>
             // whatever business logic you need to perform
@@ -890,5 +884,116 @@ object SampleJmsAcknowledgerConsumer extends IOApp.Simple {
 
 # Can we do better?
 
+- Let's think how is the API we'd like to expose...
+- And evaluate how to actually implement that!
+
 ---
 
+# Consumer with explicit ack - second iteration
+
+Ideally...
+
+```scala
+  consumer.handle { msg =>
+    for {
+      _ <- logger.info(msg.show)
+      _ <- ??? // ... actual business logic...
+    } yield AckResult.Ack
+  }
+```
+
+- `handle` should be provided with a function `JmsMessage` => `IO[AckResult]`
+- lower chanches for the client to do the wrong thing!
+- if errors are raised in the handle function, this is a bug and the program will terminate without confirming the message
+- errors regarding the business logic should be handled inside the program, reacting accordingly (ending with either an ack or nack)
+
+---
+
+# Consumer with explicit ack - second iteration
+
+[.column]
+
+```scala
+class JmsAcknowledgerConsumer private[lib] (
+  private[lib] val ctx: JmsContext,
+  private[lib] val consumer: JmsMessageConsumer
+) {
+
+  def handle(
+    runBusinessLogic: JmsMessage => IO[AckResult]
+  ): IO[Nothing] =
+    consumer.receive
+      .flatMap(runBusinessLogic)
+      .flatMap {
+        case AckResult.Ack  => IO.blocking(ctx.context.acknowledge())
+        case AckResult.NAck => IO.unit
+      }
+      .foreverM
+}
+
+object JmsAcknowledgerConsumer {
+  sealed trait AckResult
+  object AckResult {
+    case object Ack  extends AckResult
+    case object NAck extends AckResult
+  }
+
+  def make(
+    context: JmsContext, 
+    queueName: QueueName
+  ): Resource[IO, JmsAcknowledgerConsumer] =
+    for {
+      ctx      <- context.makeContextForAcknowledging
+      consumer <- ctx.makeJmsConsumer(queueName)
+    } yield new JmsAcknowledgerConsumer(ctx, consumer)
+}
+```
+
+[.column]
+
+```scala
+object SampleJmsAcknowledgerConsumer extends IOApp.Simple {
+
+  override def run: IO[Unit] =
+    jmsContextRes
+      .flatMap(ctx => JmsAcknowledgerConsumer.make(ctx, queueName))
+      .use(consumer =>
+        consumer.handle { msg =>
+          for {
+            _ <- logger.info(msg.show)
+//          _ <- ... actual business logic...
+          } yield AckResult.Ack
+        }
+      )
+}
+```
+
+[.column]
+
+---
+
+# Consumer with explicit ack - second iteration
+
+- all effects are expressed in the types (`IO`, etc...) ✅
+- resource lifecycle handled via `Resource` ✅
+- not exposing messages to `Stream` anymore, it made things harder to get the design right
+- the client is ~~forced~~ guided to do the right thing ✅
+
+Still, concurrency is yet not there...
+
+----
+
+# Supporting concurrency: back to bottom-up...
+
+- A `JMSContext` is the main interface in the simplified JMS API introduced for JMS 2.0. 
+- In terms of the JMS 1.1 API a `JMSContext` should be thought of as representing both a `Connection` and a `Session`
+- A *connection* represents a physical link to the JMS server and a *session* represents a **single-threaded context** for sending and receiving messages.
+- Applications which require **multiple sessions** to be created on the same connection should:
+  - create a root contenxt using the `createContext` methods on the `ConnectionFactory`
+  - then use the `createContext` method on the root context to create additional contexts instances that use the same connection
+  - all these `JMSContext` objects are application-managed and must be closed when no longer needed by calling their close method.
+- **JmsContext is not thread-safe!**
+
+Ref: https://docs.oracle.com/javaee/7/api/javax/jms/JMSContext.html
+
+---
