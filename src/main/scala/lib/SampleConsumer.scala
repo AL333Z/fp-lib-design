@@ -7,7 +7,7 @@ object SampleConsumer extends IOApp.Simple {
 
   override def run: IO[Unit] = {
     val jmsConsumerRes = for {
-      jmsContext <- jmsContextRes
+      jmsContext <- jmsTransactedContextRes
       consumer   <- jmsContext.makeJmsConsumer(queueName)
     } yield consumer
 

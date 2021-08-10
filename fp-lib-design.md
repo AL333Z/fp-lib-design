@@ -29,19 +29,24 @@ autoscale: true
 
 # Agenda
 
-- A reference library to wrap
-- Sketching library design
+- a sample architecture
+- a reference library to wrap
+- designing library apis
   - Introduce a bunch of building blocks
   - Refine edges, evaluate alternatives
   - Iterate
 
 ---
 
-# Goals
+# A sample architecture
 
-// TODO
+![fit, inline](pics/arch.png)
 
-- bottom-up approach
+---
+
+# A sample architecture
+
+![fit, inline](pics/projector.png)
 
 ---
 
@@ -59,7 +64,7 @@ __Java Message Service__ a.k.a. JMS
 - __Provider__: an implementation of JMS (ActiveMQ, IBM MQ, RabbitMQ, etc...)
 - __Producer__/__Publisher__: a client that creates/sends messages
 - __Consumer__/__Subscriber__: a client that receives messages
-- __Message__: a object that contains the data being transferred
+- __Message__: an object that contains the data being transferred
 - __Queue__: a buffer that contains messages sent and waiting to be read
 - __Topic__: a mechanism for sending messages that are potentialy delivered to multiple subscribers
 
@@ -86,6 +91,7 @@ We'll just put our attention on **_designing a set of APIs_** which wraps an exi
 ---
 
 # Let's start
+## with a bottom-up approach
 
 ---
 
@@ -93,11 +99,14 @@ We'll just put our attention on **_designing a set of APIs_** which wraps an exi
 
 ```java
 public void receiveMessage(ConnectionFactory connectionFactory, String queueName){
-   try (JMSContext context = connectionFactory.createContext();){
-      Queue queue = conxtex.createQueue(queueName);
-      JMSConsumer consumer = session.createConsumer(queue);
+   try (
+     JMSContext context = connectionFactory.createContext(Session.SESSION_TRANSACTED);
+   ){
+      Queue queue = context.createQueue(queueName);
+      JMSConsumer consumer = context.createConsumer(queue);
       Message msg = consumer.receive();
-      // ...
+      // ... do something useful ...
+      context.commit();
    } catch (JMSRuntimeException ex) {
       // ...
    }
@@ -112,6 +121,7 @@ public void receiveMessage(ConnectionFactory connectionFactory, String queueName
   - `Message receive(long timeout)` will block up to a timeout
   - `Message receiveNoWait()` receives the next message if one is immediately available
   - other variants...
+- In this usage of JMS we're using transacted sessions in order to explicitly commit or rollback the context (all the pending messages)
 - `JMSRuntimeException` is an _unchecked exception_
   
 ---
@@ -164,7 +174,7 @@ Another hierarchy with a set of common ops and type-specific ops
 
 - JMS is really more than that
 - JMS 2.0 brought in more goodies
-- For this session we'll just need to focus on these, which is only a relevant subset
+- For this session we'll just need to focus on these, which is only a relevant subset for our business case: consuming from a queue, do something useful with each message, and either commit or rollback each message
 
 ---
 
@@ -188,24 +198,14 @@ Another hierarchy with a set of common ops and type-specific ops
 # Our intent
 
 - having all __effects__ explicitly marked in the types
-- properly handle __resource__ acquisition/dispose (avoiding leaks!)
+- properly handle __resource__ acquisition/disposal (avoiding leaks!)
 - __prevent__ the developer using our lib from doing __wrong things__ (e.g. unconfirmed messages, deadlocks, etc...) by design
 - offering a __high-level__ set of APIs
 
 ---
 
-# How Functional Programming can help?
-
----
-
 # Let's start
 ## From the lowest level
-
----
-
-# Don't forget the basics
-
-![inline](pics/gap.png)
 
 ---
 
@@ -336,11 +336,14 @@ We just wrapped existing java classes
 
 ```java
 public void receiveMessage(ConnectionFactory connectionFactory, String queueName){
-   try (JMSContext context = connectionFactory.createContext();){
-      Queue queue = conxtex.createQueue(queueName);
-      JMSConsumer consumer = session.createConsumer(queue);
+   try (
+     JMSContext context = connectionFactory.createContext(Session.SESSION_TRANSACTED);
+   ){
+      Queue queue = context.createQueue(queueName);
+      JMSConsumer consumer = context.createConsumer(queue);
       Message msg = consumer.receive();
-      // ...
+      // ... do something useful ...
+      context.commit();
    } catch (JMSRuntimeException ex) {
       // ...
    }
@@ -354,6 +357,12 @@ public void receiveMessage(ConnectionFactory connectionFactory, String queueName
 ---
 
 # Let's see how FP con help us in doing the right thing!
+
+---
+
+# The abstraction gap
+
+![inline](pics/gap.png)
 
 ---
 
@@ -372,7 +381,7 @@ public void receiveMessage(ConnectionFactory connectionFactory, String queueName
 # IO values
 
 - are *pure* and *immutable*
-- represents just a description of a *side effectful computation*
+- represents just a **description** of a *side effectful computation*
 - are not evaluated (_suspended_) until the **end of the world**
 - respects _referential transparency_
 
@@ -448,14 +457,6 @@ val program: IO[Unit] =
 
 ---
 
-# How IO values are executed?
-
-If IO values are just a description of _effectful computations_ which can be composed and so on... 
-
-Who's gonna **_run_** the suspended computation then?
-
----
-
 [.background-color: #FFFFFF]
 
 # How to fill the abstraction gap?
@@ -467,16 +468,20 @@ Who's gonna **_run_** the suspended computation then?
 # JmsContext - first iteration
 
 ```scala
-class JmsContext(private val context: javax.jms.JMSContext) {
+sealed abstract class JmsContext(private[lib] val raw: javax.jms.JMSContext) {
+
   def createQueue(queue: QueueName): IO[JmsQueue] =
-    IO.delay(new JmsQueue(context.createQueue(queue.value)))
+    IO.delay(new JmsQueue(raw.createQueue(queue.value)))
 
   def makeJmsConsumer(queueName: QueueName): IO[JmsMessageConsumer] =
     for {
       destination <- createQueue(queueName)
-      consumer    <- IO.delay(context.createConsumer(destination.wrapped))
+      consumer    <- IO.delay(raw.createConsumer(destination.wrapped))
     } yield new JmsMessageConsumer(consumer)
 }
+
+class JmsTransactedContext private[lib] (
+  override private[lib] val raw: javax.jms.JMSContext) extends JmsContext(raw)
 ```
 
 - handle JMSRuntimeException ✅
@@ -511,8 +516,8 @@ class JmsContext(private val context: javax.jms.JMSContext) {
 
 ---
 
-[.code-highlight: 1-5]
-[.code-highlight: 7-13]
+[.code-highlight: 1-7]
+[.code-highlight: 9-15]
 [.code-highlight: all]
 
 # Introducing Resource
@@ -522,6 +527,8 @@ object Resource {
   def make[A](
     acquire: IO[A])(
     release: A => IO[Unit]): Resource[A]
+  def fromAutoCloseable[A <: AutoCloseable](
+    acquire: IO[A]): Resource[A]
 }
 
 class Resource[A] {
@@ -588,17 +595,22 @@ Output:
 # JmsContext - second iteration
 
 ```scala
-class JmsContext(private val context: javax.jms.JMSContext) {
+sealed abstract class JmsContext(private[lib] val raw: javax.jms.JMSContext) {
 
   def createQueue(queue: QueueName): IO[JmsQueue] =
-    IO.delay(new JmsQueue(context.createQueue(queue.value)))
+    IO.delay(new JmsQueue(raw.createQueue(queue.value)))
 
   def makeJmsConsumer(queueName: QueueName): Resource[IO, JmsMessageConsumer] =
     for {
       destination <- Resource.eval(createQueue(queueName))
-      consumer    <- Resource.fromAutoCloseable(IO.delay(context.createConsumer(destination.wrapped)))
+      consumer    <- Resource.fromAutoCloseable(
+        IO.delay(raw.createConsumer(destination.wrapped)))
     } yield new JmsMessageConsumer(consumer)
 }
+
+class JmsTransactedContext private[lib] (
+  override private[lib] val raw: javax.jms.JMSContext) extends JmsContext(raw)
+
 ```
 
 - handle JMSRuntimeException ✅
@@ -616,7 +628,7 @@ class JmsMessageConsumer private[lib] (
   val receive: IO[JmsMessage] =
     for {
       recOpt <- IO.delay(Option(wrapped.receiveNoWait()))
-      rec <- recOpt match {
+      rec    <- recOpt match {
         case Some(message) => IO.pure(new JmsMessage(message))
         case None          => receive
       }
@@ -642,7 +654,7 @@ class JmsMessageConsumer private[lib] (
   val receive: IO[JmsMessage] =
     for {
       recOpt <- IO.blocking(Option(wrapped.receive(pollingInterval.toMillis)))
-      rec <- recOpt match {
+      rec    <- recOpt match {
         case Some(message) => IO.pure(new JmsMessage(message))
         case None          => receive
       }
@@ -650,7 +662,7 @@ class JmsMessageConsumer private[lib] (
 }
 ```
 
-- pretty much the same as the former two
+- pretty much the same as the former
 - leveraging `receive(timeout)` and wrapping the blocking operation in `IO.blocking`
 
 ---
@@ -666,7 +678,7 @@ class JmsMessageConsumer private[lib] (
   val receive: IO[JmsMessage] =
     for {
       recOpt <- IO.delay(Option(wrapped.receiveNoWait()))
-      rec <- recOpt match {
+      rec    <- recOpt match {
         case Some(message) => IO.pure(new JmsMessage(message))
         case None          => IO.cede >> IO.sleep(pollingInterval) >> receive
       }
@@ -714,7 +726,7 @@ object SampleConsumer extends IOApp.Simple {
 ```scala
 object ibmMQ {
   // ...
-  def makeJmsContext(config: Config): Resource[IO, JmsContext] = {
+  def makeTransactedJmsClient(config: Config): Resource[IO, JmsTransactedContext] =
     for {
       context <- Resource.fromAutoCloseable(IO.delay {
         val connectionFactory: MQConnectionFactory = new MQConnectionFactory()
@@ -722,10 +734,13 @@ object ibmMQ {
         connectionFactory.setQueueManager(config.qm.value)
         connectionFactory.setConnectionNameList(hosts(config.endpoints))
         connectionFactory.setChannel(config.channel.value)
-        // ...
+        connectionFactory.createContext(
+          username.value,
+          config.password,
+          javax.jms.Session.SESSION_TRANSACTED
+        )
       })
-    } yield new JmsContext(context)
-  }
+    } yield new JmsTransactedContext(context)
 }
 ```
 
@@ -740,7 +755,7 @@ That's it!
 
 ## Cons:
 - still low level
-- how to specify message acknoledgements?
+- how to specify message confirmation?
 - what if the user needs to implement a never-ending message consumer?
 - concurrency?
 
@@ -752,55 +767,158 @@ That's it!
 
 ---
 
-# Consumer with explicit ack - first iteration
+# Transacted Consumer - first iteration
 
 [.column]
+[.code-highlight: 3-7]
+[.code-highlight: 9]
+[.code-highlight: 10]
 
 ```scala
-object JmsAcknowledgerConsumer {
+object JmsTransactedConsumer {
 
-  sealed trait AckResult
-  object AckResult {
-    // ack all the messages delivered by this context
-    case object Ack  extends AckResult
-    // do nothing, messages may be redelivered
-    case object NAck extends AckResult
+  sealed trait CommitAction
+  object CommitAction {
+    case object Commit   extends CommitAction
+    case object Rollback extends CommitAction
   }
 
-  type Acker    = AckResult => IO[Unit]
-  type Consumer = Stream[IO, JmsMessage]
+  type Committer = CommitAction => IO[Unit]
+  type Consumer  = Stream[IO, JmsMessage]
 
   def make(
-    context: JmsContext, 
-    queueName: QueueName
-  ): Resource[IO, (Consumer, Acker)] =
-    for {
-      ctx <- context.makeContextForAcknowledging
-      acker = (ackResult: AckResult) =>
-        ackResult match {
-          case AckResult.Ack  => IO.blocking(ctx.context.acknowledge())
-          case AckResult.NAck => IO.unit
+    context: JmsTransactedContext, 
+    queueName: QueueName): Resource[IO, (Consumer, Committer)] = {
+      val committer = (txRes: CommitAction) =>
+        txRes match {
+          case CommitAction.Commit   => IO.blocking(context.raw.commit())
+          case CommitAction.Rollback => IO.blocking(context.raw.rollback())  
         }
-      consumer <- ctx.makeJmsConsumer(queueName)
-    } yield (Stream.eval(consumer.receive).repeat, acker)
+      context.makeJmsConsumer(queueName).map(consumer => 
+        (Stream.eval(consumer.receive).repeat, committer))
+  }
 }
 ```
 
 [.column]
 
+[.code-highlight: none]
+
 ```scala
-object SampleJmsAcknowledgerConsumer extends IOApp.Simple {
+object SampleJmsTransactedConsumer extends IOApp.Simple {
 
   override def run: IO[Unit] =
-    jmsContextRes.flatMap(ctx => 
-      JmsAcknowledgerConsumer.make(ctx, queueName)).use {
-        case (consumer, acker) =>
+    jmsTransactedContextRes.flatMap(ctx => 
+      JmsTransactedConsumer.make(ctx, queueName)).use {
+        case (consumer, committer) =>
           consumer.evalMap { msg =>
             // whatever business logic you need to perform
-            logger.info(msg.show) >>
-              acker(AckResult.Ack)
+            logger.info(msg.show) >> 
+              committer(CommitAction.Commit)
           }.compile.drain
-    }
+      }
+}
+```
+
+---
+
+# Introducing Stream
+#### A *sequence* of effectful computation
+
+---
+
+# Introducing Stream
+
+- **Simplify the way we write concurrent streaming consumers**
+- **_Pull-based_**, a consumer pulls its values by repeatedly performing pull steps
+
+---
+
+[.background-color: #FFFFFF]
+
+# How to fill the abstraction gap?
+
+![Inline](pics/stream.png)
+
+---
+
+[.code-highlight: 1-6]
+[.code-highlight: 8-13]
+[.code-highlight: all]
+
+# Introducing Stream
+
+A stream _producing output_ of type `O` and which may _evaluate `IO` effects_.
+
+```scala
+object Stream {
+  def emit[A](a: A): Stream[A]
+  def emits[A](as: List[A]): Stream[A]
+  def eval[A](f: IO[A]): Stream[A]
+  ...
+}
+
+class Stream[O]{
+  def evalMap[O2](f: O => IO[O2]): Stream[O2]
+  ...
+  def map[O2](f: O => O2): Stream[O2]
+  def flatMap[O2](f: O => Stream[O2]): Stream[O2]
+}
+```
+
+[.footer: NB: not actual code, just a simplification sticking with IO type]
+
+---
+
+# Transacted Consumer - first iteration
+
+[.column]
+[.code-highlight: all]
+
+```scala
+object JmsTransactedConsumer {
+
+  sealed trait CommitAction
+  object CommitAction {
+    case object Commit   extends CommitAction
+    case object Rollback extends CommitAction
+  }
+
+  type Committer = CommitAction => IO[Unit]
+  type Consumer  = Stream[IO, JmsMessage]
+
+  def make(
+    context: JmsTransactedContext, 
+    queueName: QueueName): Resource[IO, (Consumer, Committer)] = {
+      val committer = (txRes: CommitAction) =>
+        txRes match {
+          case CommitAction.Commit   => IO.blocking(context.raw.commit())
+          case CommitAction.Rollback => IO.blocking(context.raw.rollback()) 
+        }
+      context.makeJmsConsumer(queueName).map(consumer => 
+        (Stream.eval(consumer.receive).repeat, committer))
+  }
+}
+```
+
+[.column]
+
+[.code-highlight: none]
+[.code-highlight: all]
+
+```scala
+object SampleJmsTransactedConsumer extends IOApp.Simple {
+
+  override def run: IO[Unit] =
+    jmsTransactedContextRes.flatMap(ctx => 
+      JmsTransactedConsumer.make(ctx, queueName)).use {
+        case (consumer, committer) =>
+          consumer.evalMap { msg =>
+            // whatever business logic you need to perform
+            logger.info(msg.show) >> 
+              committer(CommitAction.Commit)
+          }.compile.drain
+      }
 }
 ```
 
@@ -808,7 +926,7 @@ object SampleJmsAcknowledgerConsumer extends IOApp.Simple {
 
 ---
 
-# Consumer with explicit ack - first iteration
+# Transacted Consumer - first iteration
 
 [.column]
 
@@ -819,64 +937,60 @@ object SampleJmsAcknowledgerConsumer extends IOApp.Simple {
 [.column]
 
 ```scala
-object JmsAcknowledgerConsumer {
+object JmsTransactedConsumer {
 
-  sealed trait AckResult
-  object AckResult {
-    // ack all the messages delivered by this context
-    case object Ack  extends AckResult
-    // do nothing, messages may be redelivered
-    case object NAck extends AckResult
+  sealed trait CommitAction
+  object CommitAction {
+    case object Commit   extends CommitAction
+    case object Rollback extends CommitAction
   }
 
-  type Acker    = AckResult => IO[Unit]
-  type Consumer = Stream[IO, JmsMessage]
+  type Committer = CommitAction => IO[Unit]
+  type Consumer  = Stream[IO, JmsMessage]
 
   def make(
-    context: JmsContext, 
-    queueName: QueueName
-  ): Resource[IO, (Consumer, Acker)] =
-    for {
-      ctx <- context.makeContextForAcknowledging
-      acker = (ackResult: AckResult) =>
-        ackResult match {
-          case AckResult.Ack  => IO.blocking(ctx.context.acknowledge())
-          case AckResult.NAck => IO.unit
+    context: JmsTransactedContext, 
+    queueName: QueueName): Resource[IO, (Consumer, Committer)] = {
+      val committer = (txRes: CommitAction) =>
+        txRes match {
+          case CommitAction.Commit   => IO.blocking(context.raw.commit())
+          case CommitAction.Rollback => IO.blocking(context.raw.rollback()) 
         }
-      consumer <- ctx.makeJmsConsumer(queueName)
-    } yield (Stream.eval(consumer.receive).repeat, acker)
+      context.makeJmsConsumer(queueName).map(consumer => 
+        (Stream.eval(consumer.receive).repeat, committer))
+  }
 }
 ```
 
 ---
 
-# Consumer with explicit ack - first iteration
+# Transacted Consumer - first iteration
 
 [.column]
 
 But...
 
 - what happens if the user messes with our lib?
-  - the client forget to `ack`/`nack`
-  - the client `ack`/`nack` multiple times the same message
+  - the client forget to `commit`/`rollback`
+  - the client `commit`/`rollback` multiple times the same message
   - the client evaluates the stream multiple times 
 - how to support concurrency?
 
 [.column]
 
 ```scala
-object SampleJmsAcknowledgerConsumer extends IOApp.Simple {
+object SampleJmsTransactedConsumer extends IOApp.Simple {
 
   override def run: IO[Unit] =
-    jmsContextRes.flatMap(ctx => 
-      JmsAcknowledgerConsumer.make(ctx, queueName)).use {
-        case (consumer, acker) =>
+    jmsTransactedContextRes.flatMap(ctx => 
+      JmsTransactedConsumer.make(ctx, queueName)).use {
+        case (consumer, committer) =>
           consumer.evalMap { msg =>
             // whatever business logic you need to perform
-            logger.info(msg.show) >>
-              acker(AckResult.Ack)
+            logger.info(msg.show) >> 
+              committer(CommitAction.Commit)
           }.compile.drain
-    }
+      }
 }
 ```
 
@@ -889,7 +1003,7 @@ object SampleJmsAcknowledgerConsumer extends IOApp.Simple {
 
 ---
 
-# Consumer with explicit ack - second iteration
+# Transacted Consumer - second iteration
 
 Ideally...
 
@@ -898,71 +1012,72 @@ Ideally...
     for {
       _ <- logger.info(msg.show)
       _ <- ??? // ... actual business logic...
-    } yield AckResult.Ack
+    } yield TransactionResult.Commit
   }
 ```
 
-- `handle` should be provided with a function `JmsMessage` => `IO[AckResult]`
+- `handle` should be provided with a function `JmsMessage` => `IO[TransactionResult]`
 - lower chanches for the client to do the wrong thing!
 - if errors are raised in the handle function, this is a bug and the program will terminate without confirming the message
-- errors regarding the business logic should be handled inside the program, reacting accordingly (ending with either an ack or nack)
+- errors regarding the business logic should be handled inside the program, reacting accordingly (ending with either a commit or a rollback)
 
 ---
 
-# Consumer with explicit ack - second iteration
+# Transacted Consumer - second iteration
 
 [.column]
+[.code-highlight: 1-4,15]
+[.code-highlight: 1-15]
+[.code-highlight: all]
 
 ```scala
-class JmsAcknowledgerConsumer private[lib] (
+class JmsTransactedConsumer private[lib] (
   private[lib] val ctx: JmsContext,
   private[lib] val consumer: JmsMessageConsumer
 ) {
 
   def handle(
-    runBusinessLogic: JmsMessage => IO[AckResult]
-  ): IO[Nothing] =
-    consumer.receive
-      .flatMap(runBusinessLogic)
-      .flatMap {
-        case AckResult.Ack  => IO.blocking(ctx.context.acknowledge())
-        case AckResult.NAck => IO.unit
-      }
-      .foreverM
+    runBusinessLogic: JmsMessage => IO[TransactionResult]): IO[Nothing] =
+      consumer.receive
+        .flatMap(runBusinessLogic)
+        .flatMap {
+          case TransactionResult.Commit   => IO.blocking(ctx.raw.commit())
+          case TransactionResult.Rollback => IO.blocking(ctx.raw.rollback())
+        }
+        .foreverM
 }
 
-object JmsAcknowledgerConsumer {
-  sealed trait AckResult
-  object AckResult {
-    case object Ack  extends AckResult
-    case object NAck extends AckResult
+object JmsTransactedConsumer {
+  sealed trait TransactionResult
+  object TransactionResult {
+    case object Commit   extends TransactionResult
+    case object Rollback extends TransactionResult
   }
 
   def make(
-    context: JmsContext, 
-    queueName: QueueName
-  ): Resource[IO, JmsAcknowledgerConsumer] =
-    for {
-      ctx      <- context.makeContextForAcknowledging
-      consumer <- ctx.makeJmsConsumer(queueName)
-    } yield new JmsAcknowledgerConsumer(ctx, consumer)
+    context: JmsTransactedContext, 
+    queueName: QueueName): Resource[IO, JmsTransactedConsumer] =
+      context.makeJmsConsumer(queueName).map(consumer => 
+        new JmsTransactedConsumer(context, consumer))
 }
 ```
 
 [.column]
+[.code-highlight: none]
+[.code-highlight: all]
 
 ```scala
-object SampleJmsAcknowledgerConsumer extends IOApp.Simple {
+object SampleJmsTransactedConsumer extends IOApp.Simple {
 
   override def run: IO[Unit] =
-    jmsContextRes
-      .flatMap(ctx => JmsAcknowledgerConsumer.make(ctx, queueName))
+    jmsTransactedContextRes
+      .flatMap(ctx => JmsTransactedConsumer.make(ctx, queueName))
       .use(consumer =>
         consumer.handle { msg =>
           for {
             _ <- logger.info(msg.show)
 //          _ <- ... actual business logic...
-          } yield AckResult.Ack
+          } yield TransactionResult.Commit
         }
       )
 }
@@ -972,14 +1087,14 @@ object SampleJmsAcknowledgerConsumer extends IOApp.Simple {
 
 ---
 
-# Consumer with explicit ack - second iteration
+# Transacted Consumer - second iteration
 
 - all effects are expressed in the types (`IO`, etc...) ✅
 - resource lifecycle handled via `Resource` ✅
 - not exposing messages to `Stream` anymore, it made things harder to get the design right
 - the client is ~~forced~~ guided to do the right thing ✅
 
-Still, concurrency is yet not there...
+Still, concurrency is not there yet...
 
 ----
 

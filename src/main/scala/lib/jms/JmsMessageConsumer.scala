@@ -2,7 +2,6 @@ package lib.jms
 
 import cats.effect.IO
 
-import javax.jms.JMSConsumer
 import scala.concurrent.duration.{ DurationInt, FiniteDuration }
 
 class JmsMessageConsumer1 private[lib] (
@@ -35,7 +34,7 @@ class JmsMessageConsumer2 private[lib] (
 }
 
 class JmsMessageConsumer private[lib] (
-  private[lib] val wrapped: JMSConsumer,
+  private[lib] val wrapped: javax.jms.JMSConsumer,
   private[lib] val pollingInterval: FiniteDuration = 0.millis
 ) {
 

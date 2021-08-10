@@ -4,7 +4,7 @@ import cats.data.NonEmptyList
 import cats.effect.{ IO, Resource }
 import com.ibm.mq.jms.MQConnectionFactory
 import com.ibm.msg.client.wmq.common.CommonConstants
-import lib.jms.JmsContext
+import lib.jms.JmsTransactedContext
 
 object ibmMQ {
 
@@ -29,7 +29,7 @@ object ibmMQ {
 
   case class ClientId(value: String) extends AnyVal
 
-  def makeJmsClient(config: Config): Resource[IO, JmsContext] =
+  def makeTransactedJmsClient(config: Config): Resource[IO, JmsTransactedContext] =
     for {
       context <- Resource.fromAutoCloseable(IO.delay {
         val connectionFactory: MQConnectionFactory = new MQConnectionFactory()
@@ -41,11 +41,12 @@ object ibmMQ {
         config.username.map { username =>
           connectionFactory.createContext(
             username.value,
-            config.password.map(_.value).getOrElse("")
+            config.password.map(_.value).getOrElse(""),
+            javax.jms.Session.SESSION_TRANSACTED
           )
-        }.getOrElse(connectionFactory.createContext())
+        }.getOrElse(connectionFactory.createContext(javax.jms.Session.SESSION_TRANSACTED))
       })
-    } yield new JmsContext(context)
+    } yield new JmsTransactedContext(context)
 
   private def hosts(endpoints: NonEmptyList[Endpoint]): String =
     endpoints.map(e => s"${e.host}(${e.port})").toList.mkString(",")
