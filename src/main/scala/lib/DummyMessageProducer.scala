@@ -12,10 +12,14 @@ object DummyMessageProducer extends IOApp.Simple {
         for {
           jmsQueue <- ctx.createQueue(queueName)
           producer <- IO.delay(ctx.raw.createProducer())
-          _ <- (0 until 10).toList.traverse_ { i =>
-            IO.blocking(producer.send(jmsQueue.wrapped, s"Body$i")) >>
-              logger.info(s"Sent $i")
-          }
+          _ <- List
+            .fill(1000)(())
+            .traverse_(_ =>
+              (0 until 5).toList.traverse_ { i =>
+                IO.blocking(producer.send(jmsQueue.wrapped, s"Body$i")) >>
+                  logger.info(s"Sent $i")
+              } >> IO.blocking(ctx.raw.commit())
+            )
         } yield ()
       )
 }

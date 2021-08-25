@@ -426,7 +426,7 @@ class IO[A] {
 [.column]
 [.code-highlight: 1-4]
 [.code-highlight: 7-8]
-[.code-highlight: 7-9]
+[.code-highlight: 7-10]
 [.code-highlight: 7-11]
 [.code-highlight: 7-12]
 [.code-highlight: all]
@@ -970,7 +970,7 @@ object JmsTransactedConsumer {
 
 But...
 
-- what happens if the user messes with our lib?
+- what happens if the client messes with our lib?
   - the client forget to `commit`/`rollback`
   - the client `commit`/`rollback` multiple times the same message
   - the client evaluates the stream multiple times 
@@ -1091,7 +1091,7 @@ object SampleJmsTransactedConsumer extends IOApp.Simple {
 
 - all effects are expressed in the types (`IO`, etc...) ✅
 - resource lifecycle handled via `Resource` ✅
-- not exposing messages to `Stream` anymore, it made things harder to get the design right
+- not exposing messages to `Stream` anymore, it made things harder to get the design right!
 - the client is ~~forced~~ guided to do the right thing ✅
 
 Still, concurrency is not there yet...
@@ -1112,3 +1112,129 @@ Still, concurrency is not there yet...
 Ref: https://docs.oracle.com/javaee/7/api/javax/jms/JMSContext.html
 
 ---
+
+# Supporting concurrency: back to bottom-up...
+
+## A visualization
+
+![]
+
+---
+
+# Transacted Consumer - third iteration
+
+[.column]
+[.code-highlight: 1-7,19]
+[.code-highlight: 1-9,19]
+[.code-highlight: 1-13,19]
+[.code-highlight: 1-14,19]
+[.code-highlight: 1-16,19]
+[.code-highlight: 1-19]
+
+[.code-highlight: 21-26, 40]
+[.code-highlight: 21-27, 40]
+[.code-highlight: 21-29, 40]
+[.code-highlight: 21-30, 40]
+[.code-highlight: 21-31, 40]
+[.code-highlight: 21-35, 40]
+[.code-highlight: 21-36, 40]
+[.code-highlight: 21-40]
+
+[.code-highlight: all]
+
+
+```scala
+object JmsTransactedConsumer {
+
+  def make(
+    rootContext: JmsTransactedContext,
+    queueName: QueueName,
+    concurrencyLevel: Int
+  ): Resource[IO, JmsTransactedConsumer] =
+    for { // a poor man's resource pooling
+      pool <- Resource.eval(Queue.bounded[IO, (JmsContext, JmsMessageConsumer)](concurrencyLevel))
+      _    <- List.fill(concurrencyLevel)(())
+                  .traverse_(_ =>
+                    for {
+                      ctx      <- rootContext.makeTransactedContext
+                      consumer <- ctx.makeJmsConsumer(queueName)
+                      _        <- Resource.eval(pool.offer((ctx, consumer)))
+                    } yield ()
+                  )
+    } yield new JmsTransactedConsumer(pool, concurrencyLevel)
+}
+
+class JmsTransactedConsumer private[lib] (
+  private[lib] val pool: Queue[IO, (JmsContext, JmsMessageConsumer)],
+  private[lib] val concurrencyLevel: Int
+) {
+
+  def handle(runBusinessLogic: JmsMessage => IO[TransactionResult]): IO[Nothing] =
+    IO.parSequenceN[Id, Unit](concurrencyLevel) {
+        for {
+          (ctx, consumer) <- pool.take0
+          message         <- consumer.receive
+          txRes           <- runBusinessLogic(message)
+          _ <- txRes match {
+            case TransactionResult.Commit   => IO.blocking(ctx.raw.commit())
+            case TransactionResult.Rollback => IO.blocking(ctx.raw.rollback())
+          }
+          _ <- pool.offer((ctx, consumer))
+        } yield ()
+      }
+      .foreverM
+}
+```
+
+[.column]
+[.code-highlight: none]
+[.code-highlight: all]
+
+```scala
+object SampleJmsTransactedConsumer extends IOApp.Simple {
+
+  override def run: IO[Unit] =
+    jmsTransactedContextRes
+      .flatMap(ctx => JmsTransactedConsumer.make(ctx, queueName, 5))
+      .use(consumer =>
+        consumer.handle { msg =>
+          for {
+            _ <- logger.info(msg.show)
+//          _ <- ... actual business logic...
+          } yield TransactionResult.Commit
+        }
+      )
+}
+```
+
+[.column]
+
+---
+
+# Transacted Consumer - third iteration
+
+- all effects are expressed in the types (`IO`, etc...) ✅
+- resource lifecycle handled via `Resource` ✅
+- the client is ~~forced~~ guided to do the right thing ✅
+-  concurrency ✅
+
+---
+
+# Are there other ways to achieve the same?
+
+No doubt.
+This the simplest solution I found out, other solutions with better performances/tradeoff exist for sure.
+I just found this to be solving the problem well, while being reasonably straight-forward to present.
+
+---
+
+# We came a long way
+
+- We used a bunch of **data types** (`IO`, `Resource`, `Queue`)
+- We used a bunch of **common operators** (`map`, `flatMap`, `traverse`)
+- We wrote a little code, **iteratively improving the design**
+- We achieved what we needed: a fully functioning minimal lib
+
+---
+
+# Thanks
