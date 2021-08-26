@@ -6,12 +6,13 @@ autoscale: true
 
 ---
 
-# Who am I
-
+# Who am I?
 ## _@al333z_
-### Software Engineer
-### Member of _@FPinBO_ ![inline 10%](pics/fpinbo.jpg)
-### Runner
+
+- Senior Software Engineer @ Moneyfarm
+- Several years in the scala/typelevel ecosystem
+- Member of _@FPinBO_ ![inline 10%](pics/fpinbo.jpg)
+- I like to run
 
 ![right](pics/pic.jpg)
 
@@ -29,28 +30,36 @@ autoscale: true
 
 # Agenda
 
-- a sample architecture
-- a reference library to wrap
+- a sample architecture, a reference library to wrap
 - designing library apis
-  - Introduce a bunch of building blocks
-  - Refine edges, evaluate alternatives
-  - Iterate
+  - introduce a bunch of building blocks
+  - refine edges, evaluate alternatives, iterate
 
 ---
 
-# A sample architecture
+## A sample architecture
 
 ![fit, inline](pics/arch.png)
 
 ---
 
-# A sample architecture
+## A sample architecture
 
-![fit, inline](pics/projector.png)
+![fit, inline](pics/arch-highlighted.png)
 
 ---
 
-# A reference library
+## Disclaimer
+
+Our focus here is **_NOT_** on building the coolest library doing the coolest thing ever.
+
+Chances are that you'll never use JMS at all!
+
+We'll just put our attention on **_designing a set of APIs_** which wraps an existing lib written in the _good old imperative way_, using Pure Functional Programming and the Typelevel stack.
+
+---
+
+## A reference library
 
 __Java Message Service__ a.k.a. JMS
 
@@ -59,7 +68,7 @@ __Java Message Service__ a.k.a. JMS
 - can be used to facilitate the sending and receiving of messages between enterprise software systems, whatever it means enterprise!
 
 ---
-# JMS main elements
+## JMS main elements
 
 - __Provider__: an implementation of JMS (ActiveMQ, IBM MQ, RabbitMQ, etc...)
 - __Producer__/__Publisher__: a client that creates/sends messages
@@ -70,7 +79,7 @@ __Java Message Service__ a.k.a. JMS
 
 ---
 
-# Why JMS?
+## Why JMS?
 
 - ~~old~~ stable enough (born in 1998, latest revision in 2015)
 - its apis are a __good testbed for sketching a purely functional wrapper__
@@ -80,22 +89,12 @@ __Java Message Service__ a.k.a. JMS
 
 ---
 
-# Disclaimer
-
-Our focus here is **_NOT_** on building the coolest library doing the coolest thing ever.
-
-Chances are that you'll never use JMS at all!
-
-We'll just put our attention on **_designing a set of APIs_** which wraps an existing lib written in the _good old imperative way_, using Pure Functional Programming and the Typelevel stack.
-
----
-
 # Let's start
 ## with a bottom-up approach
 
 ---
 
-# A look at the beast: receiving
+## A look at the beast: receiving
 
 ```java
 public void receiveMessage(ConnectionFactory connectionFactory, String queueName){
@@ -125,6 +124,8 @@ public void receiveMessage(ConnectionFactory connectionFactory, String queueName
 - `JMSRuntimeException` is an _unchecked exception_
   
 ---
+
+<!--
 
 # A look at the beast: destinations
 
@@ -167,27 +168,26 @@ public interface StreamMessage extends Message { ... }
 Another hierarchy with a set of common ops and type-specific ops
 
 ---
+!-->
 
-# A look at the beast
+## A look at the beast
 
-## Disclaimer
+- JMS is really moooore than that
+- For this session we'll just need to focus on this specific JMS functionality, which is what we need in order to satisfy our **business case**: 
 
-- JMS is really more than that
-- JMS 2.0 brought in more goodies
-- For this session we'll just need to focus on these, which is only a relevant subset for our business case: consuming from a queue, do something useful with each message, and either commit or rollback each message
+> consuming from a queue, do something useful with each message, and either commit or rollback each message
 
 ---
 
-# What's wrong with these APIs?
+## What's wrong with these APIs?
 
-- not really composable:
-  - unchecked exceptions everywhere
-  - side-effects everywhere
+- not really composable
+- side-effects everywhere
 - _low-level_ in terms of how to build complete programs
 
 ---
 
-# What can we do to improve them?
+## What can we do to improve them?
 
 - wrapping side-effects and methods which throws
 - understand what are the core-feature we want to expose
@@ -195,7 +195,7 @@ Another hierarchy with a set of common ops and type-specific ops
 
 ---
 
-# Our intent
+## Our intent
 
 - having all __effects__ explicitly marked in the types
 - properly handle __resource__ acquisition/disposal (avoiding leaks!)
@@ -203,12 +203,7 @@ Another hierarchy with a set of common ops and type-specific ops
 - offering a __high-level__ set of APIs
 
 ---
-
-# Let's start
-## From the lowest level
-
----
-
+<!--
 # Destination
 
 ```java
@@ -331,8 +326,9 @@ We just wrapped existing java classes
 ## Hold on...
 
 ---
+-->
 
-# Receiving
+## Receiving
 
 ```java
 public void receiveMessage(ConnectionFactory connectionFactory, String queueName){
@@ -366,32 +362,24 @@ public void receiveMessage(ConnectionFactory connectionFactory, String queueName
 
 ---
 
-# Introducing IO
+## Introducing IO
 #### A data type for **encoding effects** as pure values
 
 ---
 
-# Introducing IO
+## Introducing IO
 
 - enable capturing and controlling actions - a.k.a _effects_ - that your program _wishes to perform_ within a _resource-safe_, _typed_ context with seamless support for _concurrency_ and _coordination_
 - these effects may be _asynchronous_ (callback-driven) or _synchronous_ (directly returning values); they may _return_ within microseconds or run _infinitely_.
 
 ---
 
-# IO values
-
-- are *pure* and *immutable*
-- represents just a **description** of a *side effectful computation*
-- are not evaluated (_suspended_) until the **end of the world**
-- respects _referential transparency_
-
----
-
-# IO and combinators
+## IO and combinators
 
 [.column]
 
 [.code-highlight: none]
+[.code-highlight: 1-8]
 [.code-highlight: all]
 
 ```scala
@@ -403,14 +391,7 @@ object IO {
   def async[A](k: /* ... */): IO[A]
   ...
 }
-```
 
-[.column]
-
-[.code-highlight: none]
-[.code-highlight: all]
-
-```scala
 class IO[A] {
   def map[B](f: A => B): IO[B]
   def flatMap[B](f: A => IO[B]): IO[B]
@@ -421,7 +402,7 @@ class IO[A] {
 
 ---
 
-# Composing sequential effects
+## Composing sequential effects
 
 [.column]
 [.code-highlight: 1-4]
@@ -465,7 +446,7 @@ val program: IO[Unit] =
 
 ---
 
-# JmsContext - first iteration
+## JmsContext - 1st iteration
 
 ```scala
 sealed abstract class JmsContext(private[lib] val raw: javax.jms.JMSContext) {
@@ -494,13 +475,13 @@ class JmsTransactedContext private[lib] (
 
 ---
 
-# Introducing Resource
+## Introducing Resource
 
 #### Effectfully allocates and releases a resource
 
 ---
 
-# Extremely helpful to write code that:
+## Extremely helpful to write code that:
 - doesn't leak
 - handles properly terminal signals (e.g. `SIGTERM`) by default (no need to register a shutdown hook)
 - do _the right thing_<sup>TM</sup> by design
@@ -520,7 +501,7 @@ class JmsTransactedContext private[lib] (
 [.code-highlight: 9-15]
 [.code-highlight: all]
 
-# Introducing Resource
+## Introducing Resource
 
 ```scala
 object Resource {
@@ -545,9 +526,12 @@ class Resource[A] {
 
 ---
 
-# Using a Resource
+## Using a Resource
 
 [.column]
+
+[.code-highlight: 1-5]
+[.code-highlight: all]
 
 ```scala
 val sessionPool: Resource[MySessionPool] = 
@@ -577,22 +561,21 @@ Output:
 
 ---
 
-# Gotchas:
+## Gotchas:
 - _Nested resources_ are released in *reverse order* of acquisition 
-- Easy to _lift_ an `AutoClosable` to `Resource`, via `Resource.fromAutoclosable`
 - Every time you need to use something which implements `AutoClosable`, you should really be using `Resource`!
 - You can _lift_ any `IO[A]` into a `Resource[A]` with a no-op release via `Resource.eval`
 
 ---
 
-# Why not scala.util.Using?
+### Why not scala.util.Using?
 
 - not composable (no `map`, `flatMap`, etc...)
 - no support for properly handling effects
 
 ---
 
-# JmsContext - second iteration
+## JmsContext - 2nd iteration
 
 ```scala
 sealed abstract class JmsContext(private[lib] val raw: javax.jms.JMSContext) {
@@ -619,7 +602,7 @@ class JmsTransactedContext private[lib] (
 
 ---
 
-# JMSConsumer
+## JmsMessageConsumer
 
 ```scala 
 class JmsMessageConsumer private[lib] (
@@ -643,7 +626,7 @@ class JmsMessageConsumer private[lib] (
 
 ---
 
-# JMSConsumer - alternative implementation
+## JmsMessageConsumer - alternative implementation
 
 ```scala 
 class JmsMessageConsumer private[lib] (
@@ -667,7 +650,7 @@ class JmsMessageConsumer private[lib] (
 
 ---
 
-# JMSConsumer - final
+## JmsMessageConsumer - final
 
 ```scala 
 class JmsMessageConsumer private[lib] (
@@ -693,7 +676,7 @@ class JmsMessageConsumer private[lib] (
 
 ---
 
-# Let's write down a nearly working example
+## Let's write down a nearly working example
 
 ```scala
 object SampleConsumer extends IOApp.Simple {
@@ -721,7 +704,7 @@ object SampleConsumer extends IOApp.Simple {
 
 ---
 
-# Adding support for a provider (e.g. IBM MQ)
+## Adding support for a provider (e.g. IBM MQ)
 
 ```scala
 object ibmMQ {
@@ -767,7 +750,7 @@ That's it!
 
 ---
 
-# Transacted Consumer - first iteration
+## JmsTransactedConsumer - 1st iteration
 
 [.column]
 [.code-highlight: 3-7]
@@ -815,19 +798,20 @@ object SampleJmsTransactedConsumer extends IOApp.Simple {
             // whatever business logic you need to perform
             logger.info(msg.show) >> 
               committer(CommitAction.Commit)
-          }.compile.drain
+          }
+          .compile.drain
       }
 }
 ```
 
 ---
 
-# Introducing Stream
+## Introducing Stream
 #### A *sequence* of effectful computation
 
 ---
 
-# Introducing Stream
+## Introducing Stream
 
 - **Simplify the way we write concurrent streaming consumers**
 - **_Pull-based_**, a consumer pulls its values by repeatedly performing pull steps
@@ -846,7 +830,7 @@ object SampleJmsTransactedConsumer extends IOApp.Simple {
 [.code-highlight: 8-13]
 [.code-highlight: all]
 
-# Introducing Stream
+## Introducing Stream
 
 A stream _producing output_ of type `O` and which may _evaluate `IO` effects_.
 
@@ -870,9 +854,13 @@ class Stream[O]{
 
 ---
 
-# Transacted Consumer - first iteration
+## JmsTransactedConsumer - 1st iteration
 
 [.column]
+[.code-highlight: 9-14, 22]
+[.code-highlight: 12-19, 22]
+[.code-highlight: 12-20, 22]
+[.code-highlight: 12-21, 22]
 [.code-highlight: all]
 
 ```scala
@@ -904,6 +892,7 @@ object JmsTransactedConsumer {
 [.column]
 
 [.code-highlight: none]
+[.code-highlight: 5-11]
 [.code-highlight: all]
 
 ```scala
@@ -917,7 +906,8 @@ object SampleJmsTransactedConsumer extends IOApp.Simple {
             // whatever business logic you need to perform
             logger.info(msg.show) >> 
               committer(CommitAction.Commit)
-          }.compile.drain
+          }
+          .compile.drain
       }
 }
 ```
@@ -926,73 +916,41 @@ object SampleJmsTransactedConsumer extends IOApp.Simple {
 
 ---
 
-# Transacted Consumer - first iteration
-
-[.column]
+## JmsTransactedConsumer - 1st iteration
 
 - all effects are expressed in the types (`IO`, etc...) ✅
 - resource lifecycle handled via `Resource` ✅
 - messages in the queue are exposed via a `Stream` ✅
 
-[.column]
-
-```scala
-object JmsTransactedConsumer {
-
-  sealed trait CommitAction
-  object CommitAction {
-    case object Commit   extends CommitAction
-    case object Rollback extends CommitAction
-  }
-
-  type Committer = CommitAction => IO[Unit]
-  type Consumer  = Stream[IO, JmsMessage]
-
-  def make(
-    context: JmsTransactedContext, 
-    queueName: QueueName): Resource[IO, (Consumer, Committer)] = {
-      val committer = (txRes: CommitAction) =>
-        txRes match {
-          case CommitAction.Commit   => IO.blocking(context.raw.commit())
-          case CommitAction.Rollback => IO.blocking(context.raw.rollback()) 
-        }
-      context.makeJmsConsumer(queueName).map(consumer => 
-        (Stream.eval(consumer.receive).repeat, committer))
-  }
-}
-```
-
 ---
 
-# Transacted Consumer - first iteration
-
-[.column]
+## JmsTransactedConsumer - 1st iteration
 
 But...
 
 - what happens if the client messes with our lib?
-  - the client forget to `commit`/`rollback`
-  - the client `commit`/`rollback` multiple times the same message
-  - the client evaluates the stream multiple times 
+  - the client forget to `commit`/`rollback`?
+
+    ```scala
+    consumer.evalMap { msg => logger.info(msg.show) }
+    ```
+  - the client `commit`/`rollback` multiple times the same message?
+
+    ```scala
+    consumer.evalMap { msg => 
+      committer(CommitAction.Commit) >> 
+        committer(CommitAction.Rollback) 
+    }
+    ```
+
+  - the client evaluates the stream multiple times?
+  
+  ```scala
+    consumer.evalMap{ ... } ++
+      consumer.evalMap{ ... }
+  ```
+
 - how to support concurrency?
-
-[.column]
-
-```scala
-object SampleJmsTransactedConsumer extends IOApp.Simple {
-
-  override def run: IO[Unit] =
-    jmsTransactedContextRes.flatMap(ctx => 
-      JmsTransactedConsumer.make(ctx, queueName)).use {
-        case (consumer, committer) =>
-          consumer.evalMap { msg =>
-            // whatever business logic you need to perform
-            logger.info(msg.show) >> 
-              committer(CommitAction.Commit)
-          }.compile.drain
-      }
-}
-```
 
 ---
 
@@ -1003,7 +961,7 @@ object SampleJmsTransactedConsumer extends IOApp.Simple {
 
 ---
 
-# Transacted Consumer - second iteration
+## JmsTransactedConsumer - 2nd iteration
 
 Ideally...
 
@@ -1023,7 +981,7 @@ Ideally...
 
 ---
 
-# Transacted Consumer - second iteration
+## JmsTransactedConsumer - 2nd iteration
 
 [.column]
 [.code-highlight: 1-4,15]
@@ -1076,7 +1034,7 @@ object SampleJmsTransactedConsumer extends IOApp.Simple {
         consumer.handle { msg =>
           for {
             _ <- logger.info(msg.show)
-//          _ <- ... actual business logic...
+            _ <- ??? // ... actual business logic...
           } yield TransactionResult.Commit
         }
       )
@@ -1087,7 +1045,7 @@ object SampleJmsTransactedConsumer extends IOApp.Simple {
 
 ---
 
-# Transacted Consumer - second iteration
+## JmsTransactedConsumer - 2nd iteration
 
 - all effects are expressed in the types (`IO`, etc...) ✅
 - resource lifecycle handled via `Resource` ✅
@@ -1098,7 +1056,8 @@ Still, concurrency is not there yet...
 
 ----
 
-# Supporting concurrency: back to bottom-up...
+## Supporting concurrency
+### back to bottom-up...
 
 - A `JMSContext` is the main interface in the simplified JMS API introduced for JMS 2.0. 
 - In terms of the JMS 1.1 API a `JMSContext` should be thought of as representing both a `Connection` and a `Session`
@@ -1113,15 +1072,14 @@ Ref: https://docs.oracle.com/javaee/7/api/javax/jms/JMSContext.html
 
 ---
 
-# Supporting concurrency: back to bottom-up...
+## Supporting concurrency
+### back to bottom-up...
 
-## A visualization
-
-![]
+![fit, inline](pics/pool.png)
 
 ---
 
-# Transacted Consumer - third iteration
+## JmsTransactedConsumer - 3rd iteration
 
 [.column]
 [.code-highlight: 1-7,19]
@@ -1200,7 +1158,7 @@ object SampleJmsTransactedConsumer extends IOApp.Simple {
         consumer.handle { msg =>
           for {
             _ <- logger.info(msg.show)
-//          _ <- ... actual business logic...
+            _ <- ??? // ... actual business logic...
           } yield TransactionResult.Commit
         }
       )
@@ -1211,7 +1169,7 @@ object SampleJmsTransactedConsumer extends IOApp.Simple {
 
 ---
 
-# Transacted Consumer - third iteration
+## JmsTransactedConsumer - 3rd iteration
 
 - all effects are expressed in the types (`IO`, etc...) ✅
 - resource lifecycle handled via `Resource` ✅
@@ -1228,7 +1186,7 @@ I just found this to be solving the problem well, while being reasonably straigh
 
 ---
 
-# We came a long way
+# We came a long way...
 
 - We used a bunch of **data types** (`IO`, `Resource`, `Queue`)
 - We used a bunch of **common operators** (`map`, `flatMap`, `traverse`)
