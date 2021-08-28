@@ -112,10 +112,8 @@ public void receiveMessage(ConnectionFactory connectionFactory, String queueName
 }
 ```
 
----
-
-- `JMSContext` is in charge of _opening low level stuff_ (connections, sessions, ...), implements `AutoClosable` (see the try-with-resources block)
-- `JMSConsumer` is in charge of receiving messages, via:
+^ - `JMSContext` is in charge of _opening low level stuff_ (connections, sessions, ...), implements `AutoClosable` (see the try-with-resources block)
+ `JMSConsumer` is in charge of receiving messages, via:
   - `Message receive()` will block indefinitely
   - `Message receive(long timeout)` will block up to a timeout
   - `Message receiveNoWait()` receives the next message if one is immediately available
@@ -181,16 +179,16 @@ Another hierarchy with a set of common ops and type-specific ops
 
 ## What's wrong with these APIs?
 
-- not really composable
-- side-effects everywhere
-- _low-level_ in terms of how to build complete programs
+- __not__ really __composable__
+- __*side-effects*__ everywhere
+- __low-level__ in terms of how to build complete programs
 
 ---
 
 ## What can we do to improve them?
 
-- wrapping side-effects and methods which throws
-- understand what are the core-feature we want to expose
+- **wrap** _side-effects_ and methods which throws
+- understand what are the _core feature_ we want to expose
 - evaluate what is the __design which better supports our intent__
 
 ---
@@ -369,8 +367,8 @@ public void receiveMessage(ConnectionFactory connectionFactory, String queueName
 
 ## Introducing IO
 
-- enable capturing and controlling actions - a.k.a _effects_ - that your program _wishes to perform_ within a _resource-safe_, _typed_ context with seamless support for _concurrency_ and _coordination_
-- these effects may be _asynchronous_ (callback-driven) or _synchronous_ (directly returning values); they may _return_ within microseconds or run _infinitely_.
+- enable capturing and controlling actions - a.k.a _effects_ - that your program _wishes to perform_ within a __*resource-safe*__, __*typed*__ context with seamless support for __*concurrency*__ and __*coordination*__
+- these effects may be __*asynchronous*__ (callback-driven) or __*synchronous*__ (directly returning values); they may _return_ within microseconds or run __*infinitely*__.
 
 ---
 
@@ -447,6 +445,11 @@ val program: IO[Unit] =
 ---
 
 ## JmsContext - 1st iteration
+
+[.code-highlight: 1, 11]
+[.code-highlight: 1-4, 11]
+[.code-highlight: 1-11]
+[.code-highlight: all]
 
 ```scala
 sealed abstract class JmsContext(private[lib] val raw: javax.jms.JMSContext) {
@@ -562,7 +565,7 @@ Output:
 ---
 
 ## Gotchas:
-- _Nested resources_ are released in *reverse order* of acquisition 
+- **_Nested_ resources** are **released in reverse order** of acquisition 
 - Every time you need to use something which implements `AutoClosable`, you should really be using `Resource`!
 - You can _lift_ any `IO[A]` into a `Resource[A]` with a no-op release via `Resource.eval`
 
@@ -570,12 +573,16 @@ Output:
 
 ### Why not scala.util.Using?
 
-- not composable (no `map`, `flatMap`, etc...)
+- **not composable** (no `map`, `flatMap`, etc...)
 - no support for properly handling effects
 
 ---
 
 ## JmsContext - 2nd iteration
+
+[.code-highlight: 8-10]
+[.code-highlight: 6-11]
+[.code-highlight: all]
 
 ```scala
 sealed abstract class JmsContext(private[lib] val raw: javax.jms.JMSContext) {
@@ -604,6 +611,12 @@ class JmsTransactedContext private[lib] (
 
 ## JmsMessageConsumer
 
+[.code-highlight: 1-3, 12]
+[.code-highlight: 4]
+[.code-highlight: 4-6]
+[.code-highlight: 4-10]
+[.code-highlight: all]
+
 ```scala 
 class JmsMessageConsumer private[lib] (
   private[lib] val wrapped: javax.jms.JMSConsumer
@@ -620,13 +633,16 @@ class JmsMessageConsumer private[lib] (
 ```
 
 - only exposing `receive`, which is an `IO` value which:
-  - _repeats_ a check-and-receive operation (`receiveNoWait()`) till a message is ready
-  - _completes_ the IO with the message read
-  - _cancels_ the computation, if a cancellation gets triggered (e.g. a `SIGTERM` signal)
+  - _**repeats**_ a **check-and-receive** operation (`receiveNoWait()`) till a message is ready
+  - _**completes**_ the IO with the message read
+  - _**cancels**_ the computation, if a cancellation gets triggered (e.g. a `SIGTERM` signal)
 
 ---
 
 ## JmsMessageConsumer - alternative implementation
+
+[.code-highlight: 8]
+[.code-highlight: all]
 
 ```scala 
 class JmsMessageConsumer private[lib] (
@@ -652,6 +668,9 @@ class JmsMessageConsumer private[lib] (
 
 ## JmsMessageConsumer - final
 
+[.code-highlight: 8, 11]
+[.code-highlight: all]
+
 ```scala 
 class JmsMessageConsumer private[lib] (
   private[lib] val wrapped: JMSConsumer,
@@ -670,7 +689,6 @@ class JmsMessageConsumer private[lib] (
 ```
 
 - pretty much the same as the former two
-- assumes `receiveNoWait()` is not actually blocking
 - introduce a fairness boundary via `IO.cede`, forcing the runtime to progress with other tasks if no message has been found ready to consume
 - introduce an interval in order to avoid an high cpu usage when the queue has no messages for a long time
 
@@ -699,7 +717,7 @@ object SampleConsumer extends IOApp.Simple {
 ```
 
 - `IOApp` describes a _main_ which executes an `IO` (a.k.a. *End of the world*)
-- It runs the side-effects described in the `IO`!
+- It **runs** (interprets) the side-effects described in the `IO`!
 - It's the single _entry point_ to a **pure** program.
 
 ---
@@ -732,15 +750,15 @@ That's it!
 ---
 
 ## Pros:
-- resources get acquired and released in order, the user can't leak them
-- the business logic is made by pure functions
+- **resources** get acquired and released in order, the user **can't leak** them
+- the **business logic** is made by __*pure functions*__
 
 
 ## Cons:
-- still low level
+- still **low level**
 - how to specify message confirmation?
 - what if the user needs to implement a never-ending message consumer?
-- concurrency?
+- **concurrency**?
 
 ---
 
@@ -928,13 +946,13 @@ object SampleJmsTransactedConsumer extends IOApp.Simple {
 
 But...
 
-- what happens if the client messes with our lib?
-  - the client forget to `commit`/`rollback`?
+- what happens if **the client messes with our lib**?
+  - the client **forget to `commit`/`rollback`**?
 
     ```scala
     consumer.evalMap { msg => logger.info(msg.show) }
     ```
-  - the client `commit`/`rollback` multiple times the same message?
+  - the client **`commit`/`rollback` multiple times** the same message?
 
     ```scala
     consumer.evalMap { msg => 
@@ -943,14 +961,14 @@ But...
     }
     ```
 
-  - the client evaluates the stream multiple times?
+  - the client **evaluates the stream multiple times**?
   
   ```scala
     consumer.evalMap{ ... } ++
       consumer.evalMap{ ... }
   ```
 
-- how to support concurrency?
+- how to **support concurrency**?
 
 ---
 
@@ -975,7 +993,7 @@ Ideally...
 ```
 
 - `handle` should be provided with a function `JmsMessage` => `IO[TransactionResult]`
-- lower chanches for the client to do the wrong thing!
+  - **lower chanches for the client to do the wrong thing**!
 - if errors are raised in the handle function, this is a bug and the program will terminate without confirming the message
 - errors regarding the business logic should be handled inside the program, reacting accordingly (ending with either a commit or a rollback)
 
@@ -1049,7 +1067,7 @@ object SampleJmsTransactedConsumer extends IOApp.Simple {
 
 - all effects are expressed in the types (`IO`, etc...) ✅
 - resource lifecycle handled via `Resource` ✅
-- not exposing messages to `Stream` anymore, it made things harder to get the design right!
+- not exposing messages to `Stream` anymore, **it made things harder to get the design right**!
 - the client is ~~forced~~ guided to do the right thing ✅
 
 Still, concurrency is not there yet...
@@ -1090,12 +1108,13 @@ Ref: https://docs.oracle.com/javaee/7/api/javax/jms/JMSContext.html
 [.code-highlight: 1-19]
 
 [.code-highlight: 21-26, 40]
-[.code-highlight: 21-27, 40]
-[.code-highlight: 21-29, 40]
-[.code-highlight: 21-30, 40]
-[.code-highlight: 21-31, 40]
-[.code-highlight: 21-35, 40]
-[.code-highlight: 21-36, 40]
+[.code-highlight: 21-27, 38, 40]
+[.code-highlight: 21-29, 38, 40]
+[.code-highlight: 21-30, 38, 40]
+[.code-highlight: 21-31, 38, 40]
+[.code-highlight: 21-35, 38, 40]
+[.code-highlight: 21-36, 38, 40]
+[.code-highlight: 21-38, 40]
 [.code-highlight: 21-40]
 
 [.code-highlight: all]
@@ -1181,8 +1200,11 @@ object SampleJmsTransactedConsumer extends IOApp.Simple {
 # Are there other ways to achieve the same?
 
 No doubt.
-This the simplest solution I found out, other solutions with better performances/tradeoff exist for sure.
-I just found this to be solving the problem well, while being reasonably straight-forward to present.
+This the simplest solution I found out, **other solutions with better performances/tradeoffs exist for sure**.
+I just found this to be:
+- **solving the problem well**
+- **offering a good and safe set of APIs** to the client
+- reasonably straight-forward to present
 
 ---
 
@@ -1191,7 +1213,7 @@ I just found this to be solving the problem well, while being reasonably straigh
 - We used a bunch of **data types** (`IO`, `Resource`, `Queue`)
 - We used a bunch of **common operators** (`map`, `flatMap`, `traverse`)
 - We wrote a little code, **iteratively improving the design**
-- We achieved what we needed: a fully functioning minimal lib
+- We achieved what we needed: a fully functioning functional minimal lib
 
 ---
 
