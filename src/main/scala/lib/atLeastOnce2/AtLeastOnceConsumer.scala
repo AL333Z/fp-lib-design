@@ -1,13 +1,13 @@
-package lib
+package lib.atLeastOnce2
 
 import cats.effect.{ IO, IOApp, Resource }
 import cats.implicits._
-import lib.DemoUtils._
-import lib.JmsTransactedConsumer2.TransactionResult
+import lib.DemoUtils.{ jmsTransactedContextRes, logger, queueName }
+import lib.atLeastOnce2.AtLeastOnceConsumer.TransactionResult
 import lib.config.DestinationName.QueueName
 import lib.jms.{ JmsContext, JmsMessage, JmsMessageConsumer, JmsTransactedContext }
 
-class JmsTransactedConsumer2 private[lib] (
+class AtLeastOnceConsumer private[lib] (
   private[lib] val ctx: JmsContext,
   private[lib] val consumer: JmsMessageConsumer
 ) {
@@ -22,7 +22,7 @@ class JmsTransactedConsumer2 private[lib] (
       .foreverM
 }
 
-object JmsTransactedConsumer2 {
+object AtLeastOnceConsumer {
   sealed trait TransactionResult
 
   object TransactionResult {
@@ -30,20 +30,20 @@ object JmsTransactedConsumer2 {
     case object Rollback extends TransactionResult
   }
 
-  def make(context: JmsTransactedContext, queueName: QueueName): Resource[IO, JmsTransactedConsumer2] =
-    context.makeJmsConsumer(queueName).map(consumer => new JmsTransactedConsumer2(context, consumer))
+  def make(context: JmsTransactedContext, queueName: QueueName): Resource[IO, AtLeastOnceConsumer] =
+    context.makeJmsConsumer(queueName).map(consumer => new AtLeastOnceConsumer(context, consumer))
 }
 
-object SampleJmsTransactedConsumer2 extends IOApp.Simple {
+object Demo extends IOApp.Simple {
 
   override def run: IO[Unit] =
     jmsTransactedContextRes
-      .flatMap(ctx => JmsTransactedConsumer2.make(ctx, queueName))
+      .flatMap(ctx => AtLeastOnceConsumer.make(ctx, queueName))
       .use(consumer =>
         consumer.handle { msg =>
           for {
             _ <- logger.info(msg.show)
-//          _ <- ... actual business logic...
+            //          _ <- ... actual business logic...
           } yield TransactionResult.Commit
         }
       )

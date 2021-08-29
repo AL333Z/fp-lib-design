@@ -13,7 +13,7 @@ object DemoUtils {
   val logger: Logger[IO] = Slf4jLogger.getLogger[IO]
 
   val jmsTransactedContextRes: Resource[IO, JmsTransactedContext] =
-    ibmMQ.makeTransactedJmsClient(
+    ibmMQ.makeJmsTransactedContext(
       Config(
         qm = QueueManager("QM1"),
         endpoints = NonEmptyList.one(Endpoint("localhost", 1414)),

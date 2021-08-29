@@ -28,7 +28,6 @@ sealed abstract class JmsContext(private[lib] val raw: javax.jms.JMSContext) {
         IO.blocking(context.close())
       )
       .map(context => new JmsTransactedContext(context))
-
 }
 
 class JmsTransactedContext private[lib] (override private[lib] val raw: javax.jms.JMSContext) extends JmsContext(raw)

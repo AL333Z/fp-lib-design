@@ -1,14 +1,14 @@
-package lib
+package lib.atLeastOnce1
 
 import cats.effect.{ IO, IOApp, Resource }
 import cats.implicits._
 import fs2.Stream
-import lib.DemoUtils._
-import lib.JmsTransactedConsumer1.CommitAction
+import lib.DemoUtils.{ jmsTransactedContextRes, logger, queueName }
+import lib.atLeastOnce1.AtLeastOnceConsumer.CommitAction
 import lib.config.DestinationName.QueueName
 import lib.jms.{ JmsMessage, JmsTransactedContext }
 
-object JmsTransactedConsumer1 {
+object AtLeastOnceConsumer {
 
   sealed trait CommitAction
 
@@ -32,10 +32,10 @@ object JmsTransactedConsumer1 {
   }
 }
 
-object SampleJmsTransactedConsumer1 extends IOApp.Simple {
+object Demo extends IOApp.Simple {
 
   override def run: IO[Unit] =
-    jmsTransactedContextRes.flatMap(ctx => JmsTransactedConsumer1.make(ctx, queueName)).use {
+    jmsTransactedContextRes.flatMap(ctx => AtLeastOnceConsumer.make(ctx, queueName)).use {
       case (consumer, committer) =>
         consumer.evalMap { msg =>
           logger.info(msg.show) >> // whatever business logic you need to perform

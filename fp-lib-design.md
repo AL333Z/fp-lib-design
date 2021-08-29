@@ -727,7 +727,7 @@ object SampleConsumer extends IOApp.Simple {
 ```scala
 object ibmMQ {
   // ...
-  def makeTransactedJmsClient(config: Config): Resource[IO, JmsTransactedContext] =
+  def makeJmsTransactedContext(config: Config): Resource[IO, JmsTransactedContext] =
     for {
       context <- Resource.fromAutoCloseable(IO.delay {
         val connectionFactory: MQConnectionFactory = new MQConnectionFactory()
@@ -738,7 +738,7 @@ object ibmMQ {
         connectionFactory.createContext(
           username.value,
           config.password,
-          javax.jms.Session.SESSION_TRANSACTED
+          javax.jms.Session.SESSION_TRANSACTED // support for at-least-once
         )
       })
     } yield new JmsTransactedContext(context)
@@ -768,7 +768,7 @@ That's it!
 
 ---
 
-## JmsTransactedConsumer - 1st iteration
+## AtLeastOnceConsumer - 1st iteration
 
 [.column]
 [.code-highlight: 3-7]
@@ -776,7 +776,7 @@ That's it!
 [.code-highlight: 10]
 
 ```scala
-object JmsTransactedConsumer {
+object AtLeastOnceConsumer {
 
   sealed trait CommitAction
   object CommitAction {
@@ -806,11 +806,11 @@ object JmsTransactedConsumer {
 [.code-highlight: none]
 
 ```scala
-object SampleJmsTransactedConsumer extends IOApp.Simple {
+object Demo extends IOApp.Simple {
 
   override def run: IO[Unit] =
     jmsTransactedContextRes.flatMap(ctx => 
-      JmsTransactedConsumer.make(ctx, queueName)).use {
+      AtLeastOnceConsumer.make(ctx, queueName)).use {
         case (consumer, committer) =>
           consumer.evalMap { msg =>
             // whatever business logic you need to perform
@@ -872,7 +872,7 @@ class Stream[O]{
 
 ---
 
-## JmsTransactedConsumer - 1st iteration
+## AtLeastOnceConsumer - 1st iteration
 
 [.column]
 [.code-highlight: 9-14, 22]
@@ -882,7 +882,7 @@ class Stream[O]{
 [.code-highlight: all]
 
 ```scala
-object JmsTransactedConsumer {
+object AtLeastOnceConsumer {
 
   sealed trait CommitAction
   object CommitAction {
@@ -914,11 +914,11 @@ object JmsTransactedConsumer {
 [.code-highlight: all]
 
 ```scala
-object SampleJmsTransactedConsumer extends IOApp.Simple {
+object Demo extends IOApp.Simple {
 
   override def run: IO[Unit] =
     jmsTransactedContextRes.flatMap(ctx => 
-      JmsTransactedConsumer.make(ctx, queueName)).use {
+      AtLeastOnceConsumer.make(ctx, queueName)).use {
         case (consumer, committer) =>
           consumer.evalMap { msg =>
             // whatever business logic you need to perform
@@ -934,7 +934,7 @@ object SampleJmsTransactedConsumer extends IOApp.Simple {
 
 ---
 
-## JmsTransactedConsumer - 1st iteration
+## AtLeastOnceConsumer - 1st iteration
 
 - all effects are expressed in the types (`IO`, etc...) ✅
 - resource lifecycle handled via `Resource` ✅
@@ -942,7 +942,7 @@ object SampleJmsTransactedConsumer extends IOApp.Simple {
 
 ---
 
-## JmsTransactedConsumer - 1st iteration
+## AtLeastOnceConsumer - 1st iteration
 
 But...
 
@@ -979,7 +979,7 @@ But...
 
 ---
 
-## JmsTransactedConsumer - 2nd iteration
+## AtLeastOnceConsumer - 2nd iteration
 
 Ideally...
 
@@ -999,7 +999,7 @@ Ideally...
 
 ---
 
-## JmsTransactedConsumer - 2nd iteration
+## AtLeastOnceConsumer - 2nd iteration
 
 [.column]
 [.code-highlight: 1-4,15]
@@ -1007,7 +1007,7 @@ Ideally...
 [.code-highlight: all]
 
 ```scala
-class JmsTransactedConsumer private[lib] (
+class AtLeastOnceConsumer private[lib] (
   private[lib] val ctx: JmsContext,
   private[lib] val consumer: JmsMessageConsumer
 ) {
@@ -1023,7 +1023,7 @@ class JmsTransactedConsumer private[lib] (
         .foreverM
 }
 
-object JmsTransactedConsumer {
+object AtLeastOnceConsumer {
   sealed trait TransactionResult
   object TransactionResult {
     case object Commit   extends TransactionResult
@@ -1032,9 +1032,9 @@ object JmsTransactedConsumer {
 
   def make(
     context: JmsTransactedContext, 
-    queueName: QueueName): Resource[IO, JmsTransactedConsumer] =
+    queueName: QueueName): Resource[IO, AtLeastOnceConsumer] =
       context.makeJmsConsumer(queueName).map(consumer => 
-        new JmsTransactedConsumer(context, consumer))
+        new AtLeastOnceConsumer(context, consumer))
 }
 ```
 
@@ -1043,11 +1043,11 @@ object JmsTransactedConsumer {
 [.code-highlight: all]
 
 ```scala
-object SampleJmsTransactedConsumer extends IOApp.Simple {
+object Demo extends IOApp.Simple {
 
   override def run: IO[Unit] =
     jmsTransactedContextRes
-      .flatMap(ctx => JmsTransactedConsumer.make(ctx, queueName))
+      .flatMap(ctx => AtLeastOnceConsumer.make(ctx, queueName))
       .use(consumer =>
         consumer.handle { msg =>
           for {
@@ -1063,7 +1063,7 @@ object SampleJmsTransactedConsumer extends IOApp.Simple {
 
 ---
 
-## JmsTransactedConsumer - 2nd iteration
+## AtLeastOnceConsumer - 2nd iteration
 
 - all effects are expressed in the types (`IO`, etc...) ✅
 - resource lifecycle handled via `Resource` ✅
@@ -1097,7 +1097,7 @@ Ref: https://docs.oracle.com/javaee/7/api/javax/jms/JMSContext.html
 
 ---
 
-## JmsTransactedConsumer - 3rd iteration
+## AtLeastOnceConsumer - 3rd iteration
 
 [.column]
 [.code-highlight: 1-7,19]
@@ -1121,13 +1121,13 @@ Ref: https://docs.oracle.com/javaee/7/api/javax/jms/JMSContext.html
 
 
 ```scala
-object JmsTransactedConsumer {
+object AtLeastOnceConsumer {
 
   def make(
     rootContext: JmsTransactedContext,
     queueName: QueueName,
     concurrencyLevel: Int
-  ): Resource[IO, JmsTransactedConsumer] =
+  ): Resource[IO, AtLeastOnceConsumer] =
     for { // a poor man's resource pooling
       pool <- Resource.eval(Queue.bounded[IO, (JmsContext, JmsMessageConsumer)](concurrencyLevel))
       _    <- List.fill(concurrencyLevel)(())
@@ -1138,10 +1138,10 @@ object JmsTransactedConsumer {
                       _        <- Resource.eval(pool.offer((ctx, consumer)))
                     } yield ()
                   )
-    } yield new JmsTransactedConsumer(pool, concurrencyLevel)
+    } yield new AtLeastOnceConsumer(pool, concurrencyLevel)
 }
 
-class JmsTransactedConsumer private[lib] (
+class AtLeastOnceConsumer private[lib] (
   private[lib] val pool: Queue[IO, (JmsContext, JmsMessageConsumer)],
   private[lib] val concurrencyLevel: Int
 ) {
@@ -1168,11 +1168,11 @@ class JmsTransactedConsumer private[lib] (
 [.code-highlight: all]
 
 ```scala
-object SampleJmsTransactedConsumer extends IOApp.Simple {
+object Demo extends IOApp.Simple {
 
   override def run: IO[Unit] =
     jmsTransactedContextRes
-      .flatMap(ctx => JmsTransactedConsumer.make(ctx, queueName, 5))
+      .flatMap(ctx => AtLeastOnceConsumer.make(ctx, queueName, 5))
       .use(consumer =>
         consumer.handle { msg =>
           for {
@@ -1188,7 +1188,7 @@ object SampleJmsTransactedConsumer extends IOApp.Simple {
 
 ---
 
-## JmsTransactedConsumer - 3rd iteration
+## AtLeastOnceConsumer - 3rd iteration
 
 - all effects are expressed in the types (`IO`, etc...) ✅
 - resource lifecycle handled via `Resource` ✅

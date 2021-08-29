@@ -29,7 +29,7 @@ object ibmMQ {
 
   case class ClientId(value: String) extends AnyVal
 
-  def makeTransactedJmsClient(config: Config): Resource[IO, JmsTransactedContext] =
+  def makeJmsTransactedContext(config: Config): Resource[IO, JmsTransactedContext] =
     for {
       context <- Resource.fromAutoCloseable(IO.delay {
         val connectionFactory: MQConnectionFactory = new MQConnectionFactory()

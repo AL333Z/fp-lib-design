@@ -1,15 +1,15 @@
-package lib
+package lib.atLeastOnce3
 
 import cats.Id
 import cats.effect.std.Queue
 import cats.effect.{ IO, IOApp, Resource }
 import cats.implicits._
-import lib.DemoUtils._
-import lib.JmsTransactedConsumer3.TransactionResult
+import lib.DemoUtils.{ jmsTransactedContextRes, logger, queueName }
+import lib.atLeastOnce3.AtLeastOnceConsumer.TransactionResult
 import lib.config.DestinationName.QueueName
 import lib.jms.{ JmsContext, JmsMessage, JmsMessageConsumer, JmsTransactedContext }
 
-class JmsTransactedConsumer3 private[lib] (
+class AtLeastOnceConsumer private[lib] (
   private[lib] val pool: Queue[IO, (JmsContext, JmsMessageConsumer)],
   private[lib] val concurrencyLevel: Int
 ) {
@@ -30,7 +30,7 @@ class JmsTransactedConsumer3 private[lib] (
       .foreverM
 }
 
-object JmsTransactedConsumer3 {
+object AtLeastOnceConsumer {
   sealed trait TransactionResult
 
   object TransactionResult {
@@ -42,7 +42,7 @@ object JmsTransactedConsumer3 {
     rootContext: JmsTransactedContext,
     queueName: QueueName,
     concurrencyLevel: Int
-  ): Resource[IO, JmsTransactedConsumer3] =
+  ): Resource[IO, AtLeastOnceConsumer] =
     for {
       pool <- Resource.eval(Queue.bounded[IO, (JmsContext, JmsMessageConsumer)](concurrencyLevel))
       _ <- List
@@ -54,19 +54,19 @@ object JmsTransactedConsumer3 {
             _        <- Resource.eval(pool.offer((ctx, consumer)))
           } yield ()
         )
-    } yield new JmsTransactedConsumer3(pool, concurrencyLevel)
+    } yield new AtLeastOnceConsumer(pool, concurrencyLevel)
 }
 
-object SampleJmsTransactedConsumer3 extends IOApp.Simple {
+object Demo extends IOApp.Simple {
 
   override def run: IO[Unit] =
     jmsTransactedContextRes
-      .flatMap(ctx => JmsTransactedConsumer3.make(ctx, queueName, 5))
+      .flatMap(ctx => AtLeastOnceConsumer.make(ctx, queueName, 5))
       .use(consumer =>
         consumer.handle { msg =>
           for {
             _ <- logger.info(msg.show)
-//          _ <- ... actual business logic...
+            //          _ <- ... actual business logic...
           } yield TransactionResult.Commit
         }
       )
