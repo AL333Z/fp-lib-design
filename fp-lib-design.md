@@ -17,7 +17,7 @@ autoscale: true
 ![right](pics/pic.jpg)
 
 ---
-
+<!--
 # Why this talk?
 
 ### _Functional Programming is great, but..._
@@ -27,6 +27,7 @@ autoscale: true
 - one may argue that FP is __not suited__ for all the use cases
 
 ---
+-->
 
 # Agenda
 
@@ -53,8 +54,6 @@ autoscale: true
 
 Our focus here is **_NOT_** on building the coolest library doing the coolest thing ever.
 
-Chances are that you'll never use JMS at all!
-
 We'll just put our attention on **_designing a set of APIs_** which wraps an existing lib written in the _good old imperative way_, using Pure Functional Programming and the Typelevel stack.
 
 ---
@@ -73,9 +72,7 @@ __Java Message Service__ a.k.a. JMS
 - __Provider__: an implementation of JMS (ActiveMQ, IBM MQ, RabbitMQ, etc...)
 - __Producer__/__Publisher__: a client that creates/sends messages
 - __Consumer__/__Subscriber__: a client that receives messages
-- __Message__: an object that contains the data being transferred
 - __Queue__: a buffer that contains messages sent and waiting to be read
-- __Topic__: a mechanism for sending messages that are potentialy delivered to multiple subscribers
 
 ---
 
@@ -83,7 +80,6 @@ __Java Message Service__ a.k.a. JMS
 
 - ~~old~~ stable enough (born in 1998, latest revision in 2015)
 - its apis are a __good testbed for sketching a purely functional wrapper__
-  - loads of state, side-effects, exceptions, ...
 - found pretty much nothing about (no FP-like bindings...)
 - I don't like suffering to much while working
 
@@ -177,26 +173,11 @@ Another hierarchy with a set of common ops and type-specific ops
 
 ---
 
-## What's wrong with these APIs?
-
-- __not__ really __composable__
-- __*side-effects*__ everywhere
-- __low-level__ in terms of how to build complete programs
-
----
-
-## What can we do to improve them?
-
-- **wrap** _side-effects_ and methods which throws
-- understand what are the _core feature_ we want to expose
-- evaluate what is the __design which better supports our intent__
-
----
-
-## Our intent
+## What can we do to improve them these APIs??
 
 - having all __effects__ explicitly marked in the types
 - properly handle __resource__ acquisition/disposal (avoiding leaks!)
+- evaluate what is the __design which better supports our intent__
 - __prevent__ the developer using our lib from doing __wrong things__ (e.g. unconfirmed messages, deadlocks, etc...) by design
 - offering a __high-level__ set of APIs
 
@@ -393,7 +374,6 @@ object IO {
 class IO[A] {
   def map[B](f: A => B): IO[B]
   def flatMap[B](f: A => IO[B]): IO[B]
-  def *>[B](fb: IO[B]): IO[B]
   ...
 }
 ```
@@ -526,6 +506,7 @@ class Resource[A] {
 
 [.footer: NB: not actual code, just a simplification sticking with IO type]
 ^ A note on the simplification
+^ Every time you need to use something which implements `AutoClosable`, you should really be using `Resource`!
 
 ---
 
@@ -562,19 +543,7 @@ Output:
 > Releasing connection
 ```
 
----
-
-## Gotchas:
-- **_Nested_ resources** are **released in reverse order** of acquisition 
-- Every time you need to use something which implements `AutoClosable`, you should really be using `Resource`!
-- You can _lift_ any `IO[A]` into a `Resource[A]` with a no-op release via `Resource.eval`
-
----
-
-### Why not scala.util.Using?
-
-- **not composable** (no `map`, `flatMap`, etc...)
-- no support for properly handling effects
+^ **_Nested_ resources** are **released in reverse order** of acquisition 
 
 ---
 
@@ -606,6 +575,8 @@ class JmsTransactedContext private[lib] (
 - handle JMSRuntimeException ✅
 - build a consumer that can be injected in our application components ✅
 - handle the resource lifecycle ✅
+
+^ You can _lift_ any `IO[A]` into a `Resource[A]` with a no-op release via `Resource.eval`
 
 ---
 
@@ -665,7 +636,7 @@ class JmsMessageConsumer private[lib] (
 - leveraging `receive(timeout)` and wrapping the blocking operation in `IO.blocking`
 
 ---
-
+<!--
 ## JmsMessageConsumer - final
 
 [.code-highlight: 8, 11]
@@ -693,6 +664,7 @@ class JmsMessageConsumer private[lib] (
 - introduce an interval in order to avoid an high cpu usage when the queue has no messages for a long time
 
 ---
+-->
 
 ## Let's write down a nearly working example
 
@@ -757,8 +729,7 @@ That's it!
 ## Cons:
 - still **low level**
 - how to specify message confirmation?
-- what if the user needs to implement a never-ending message consumer?
-- **concurrency**?
+- what if the user needs to implement a never-ending concurrent message consumer?
 
 ---
 
@@ -868,7 +839,7 @@ class Stream[O]{
 }
 ```
 
-[.footer: NB: not actual code, just a simplification sticking with IO type]
+[.footer: NB: not actual code, just a simplification sticking with the IO type]
 
 ---
 
@@ -1201,6 +1172,7 @@ object Demo extends IOApp.Simple {
 
 No doubt.
 This the simplest solution I found out, **other solutions with better performances/tradeoffs exist for sure**.
+
 I just found this to be:
 - **solving the problem well**
 - **offering a good and safe set of APIs** to the client
