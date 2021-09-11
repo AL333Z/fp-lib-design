@@ -355,7 +355,10 @@ public void receiveMessage(ConnectionFactory connectionFactory, String queueName
 
 ## IO and combinators
 
+
 [.column]
+
+#### Building effects
 
 [.code-highlight: none]
 [.code-highlight: 1-8]
@@ -378,11 +381,11 @@ class IO[A] {
 }
 ```
 
----
-
-## Composing sequential effects
-
 [.column]
+
+#### Composing effects
+
+[.code-highlight: none]
 [.code-highlight: 1-4]
 [.code-highlight: 7-8]
 [.code-highlight: 7-10]
@@ -405,6 +408,9 @@ val program: IO[Unit] =
  } yield ()
 ```
 [.column]
+
+#### Running effects
+
 [.code-highlight: none]
 [.code-highlight: all]
 ```
@@ -480,11 +486,15 @@ class JmsTransactedContext private[lib] (
 
 ---
 
+## Introducing Resource
+
+[.column]
+
+#### Building resources
+
 [.code-highlight: 1-7]
 [.code-highlight: 9-15]
 [.code-highlight: all]
-
-## Introducing Resource
 
 ```scala
 object Resource {
@@ -504,16 +514,15 @@ class Resource[A] {
 }
 ```
 
-[.footer: NB: not actual code, just a simplification sticking with IO type]
+[.footer: NB: not actual code, Resource is polymorphic in the effect type]
 ^ A note on the simplification
 ^ Every time you need to use something which implements `AutoClosable`, you should really be using `Resource`!
 
----
-
-## Using a Resource
-
 [.column]
 
+#### Composing resources
+
+[.code-highlight: none]
 [.code-highlight: 1-5]
 [.code-highlight: all]
 
@@ -530,6 +539,8 @@ sessionPool.use { sessions =>
 ```
 
 [.column]
+
+#### Using resources
 
 [.code-highlight: none]
 [.code-highlight: all]
@@ -758,16 +769,20 @@ object AtLeastOnceConsumer {
   type Committer = CommitAction => IO[Unit]
   type Consumer  = Stream[IO, JmsMessage]
 
-  def make(
-    context: JmsTransactedContext, 
-    queueName: QueueName): Resource[IO, (Consumer, Committer)] = {
-      val committer = (txRes: CommitAction) =>
-        txRes match {
-          case CommitAction.Commit   => IO.blocking(context.raw.commit())
-          case CommitAction.Rollback => IO.blocking(context.raw.rollback())  
-        }
-      context.makeJmsConsumer(queueName).map(consumer => 
-        (Stream.eval(consumer.receive).repeat, committer))
+  def make(context: JmsTransactedContext, 
+           queueName: QueueName): Resource[IO, (Consumer, Committer)] = {
+    val committer = (txRes: CommitAction) =>
+      txRes match {
+        case CommitAction.Commit   => IO.blocking(context.raw.commit())
+        case CommitAction.Rollback => IO.blocking(context.raw.rollback())
+      }
+    val buildStreamingConsumer = (consumer: JmsMessageConsumer) => 
+      Stream.eval[IO, JmsMessage](consumer.receive).repeat
+
+    context
+      .makeJmsConsumer(queueName)
+      .map(buildStreamingConsumer)
+      .map(consumer => (consumer, committer))
   }
 }
 ```
@@ -846,10 +861,10 @@ class Stream[O]{
 ## AtLeastOnceConsumer - 1st iteration
 
 [.column]
-[.code-highlight: 9-14, 22]
-[.code-highlight: 12-19, 22]
-[.code-highlight: 12-20, 22]
-[.code-highlight: 12-21, 22]
+[.code-highlight: 9-13, 26]
+[.code-highlight: 9, 14-18, 26]
+[.code-highlight: 10, 19-20, 26]
+[.code-highlight: 9-25, 26]
 [.code-highlight: all]
 
 ```scala
@@ -864,16 +879,20 @@ object AtLeastOnceConsumer {
   type Committer = CommitAction => IO[Unit]
   type Consumer  = Stream[IO, JmsMessage]
 
-  def make(
-    context: JmsTransactedContext, 
-    queueName: QueueName): Resource[IO, (Consumer, Committer)] = {
-      val committer = (txRes: CommitAction) =>
-        txRes match {
-          case CommitAction.Commit   => IO.blocking(context.raw.commit())
-          case CommitAction.Rollback => IO.blocking(context.raw.rollback()) 
-        }
-      context.makeJmsConsumer(queueName).map(consumer => 
-        (Stream.eval(consumer.receive).repeat, committer))
+  def make(context: JmsTransactedContext, 
+           queueName: QueueName): Resource[IO, (Consumer, Committer)] = {
+    val committer = (txRes: CommitAction) =>
+      txRes match {
+        case CommitAction.Commit   => IO.blocking(context.raw.commit())
+        case CommitAction.Rollback => IO.blocking(context.raw.rollback())
+      }
+    val buildStreamingConsumer = (consumer: JmsMessageConsumer) => 
+      Stream.eval[IO, JmsMessage](consumer.receive).repeat
+
+    context
+      .makeJmsConsumer(queueName)
+      .map(buildStreamingConsumer)
+      .map(consumer => (consumer, committer))
   }
 }
 ```

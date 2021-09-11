@@ -6,7 +6,7 @@ import fs2.Stream
 import lib.DemoUtils.{ jmsTransactedContextRes, logger, queueName }
 import lib.atLeastOnce1.AtLeastOnceConsumer.CommitAction
 import lib.config.DestinationName.QueueName
-import lib.jms.{ JmsMessage, JmsTransactedContext }
+import lib.jms.{ JmsMessage, JmsMessageConsumer, JmsTransactedContext }
 
 object AtLeastOnceConsumer {
 
@@ -28,7 +28,12 @@ object AtLeastOnceConsumer {
         case CommitAction.Rollback =>
           IO.blocking(context.raw.rollback()) // do nothing, messages may be redelivered
       }
-    context.makeJmsConsumer(queueName).map(consumer => (Stream.eval(consumer.receive).repeat, committer))
+    val buildStreamingConsumer = (consumer: JmsMessageConsumer) => Stream.eval[IO, JmsMessage](consumer.receive).repeat
+
+    context
+      .makeJmsConsumer(queueName)
+      .map(buildStreamingConsumer)
+      .map(consumer => (consumer, committer))
   }
 }
 
