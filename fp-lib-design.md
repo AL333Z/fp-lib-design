@@ -67,21 +67,22 @@ __Java Message Service__ a.k.a. JMS
 - can be used to facilitate the sending and receiving of messages between enterprise software systems, whatever it means enterprise!
 
 ---
-## JMS main elements
-
-- __Provider__: an implementation of JMS (ActiveMQ, IBM MQ, RabbitMQ, etc...)
-- __Producer__/__Publisher__: a client that creates/sends messages
-- __Consumer__/__Subscriber__: a client that receives messages
-- __Queue__: a buffer that contains messages sent and waiting to be read
-
----
 
 ## Why JMS?
 
 - ~~old~~ stable enough (born in 1998, latest revision in 2015)
 - its apis are a __good testbed for sketching a purely functional wrapper__
 - found pretty much nothing about (no FP-like bindings...)
-- I don't like suffering to much while working
+- I don't like suffering to much, while working
+
+---
+
+## JMS main elements
+
+- __Provider__: an implementation of JMS (ActiveMQ, IBM MQ, RabbitMQ, etc...)
+- __Producer__/__Publisher__: a client that creates/sends messages
+- __Consumer__/__Subscriber__: a client that receives messages
+- __Queue__: a buffer that contains messages sent and waiting to be read
 
 ---
 
@@ -114,6 +115,7 @@ public void receiveMessage(ConnectionFactory connectionFactory, String queueName
   - `Message receive(long timeout)` will block up to a timeout
   - `Message receiveNoWait()` receives the next message if one is immediately available
   - other variants...
+  - JMSConsumer is AutoClosable as well
 - In this usage of JMS we're using transacted sessions in order to explicitly commit or rollback the context (all the pending messages)
 - `JMSRuntimeException` is an _unchecked exception_
   
@@ -331,7 +333,7 @@ public void receiveMessage(ConnectionFactory connectionFactory, String queueName
 
 ---
 
-# Let's see how FP con help us in doing the right thing!
+# Let's see how FP con help us in doing the right thing<sup>TM</sup>!
 
 ---
 
@@ -390,7 +392,6 @@ class IO[A] {
 [.code-highlight: 7-8]
 [.code-highlight: 7-10]
 [.code-highlight: 7-11]
-[.code-highlight: 7-12]
 [.code-highlight: all]
 
 ```scala
@@ -471,10 +472,9 @@ class JmsTransactedContext private[lib] (
 ---
 
 ## Extremely helpful to write code that:
-- doesn't leak
-- handles properly terminal signals (e.g. `SIGTERM`) by default (no need to register a shutdown hook)
+- **doesn't leak**
+- handles properly **terminal signals** (e.g. `SIGTERM`) by default (no need to register a shutdown hook)
 - do _the right thing_<sup>TM</sup> by design
-- avoid the need to reboot a container every once in a while :)
 
 ---
 
@@ -677,7 +677,7 @@ class JmsMessageConsumer private[lib] (
 ---
 -->
 
-## Let's write down a nearly working example
+## A nearly working example
 
 ```scala
 object SampleConsumer extends IOApp.Simple {
@@ -699,9 +699,9 @@ object SampleConsumer extends IOApp.Simple {
 }
 ```
 
-- `IOApp` describes a _main_ which executes an `IO` (a.k.a. *End of the world*)
-- It **runs** (interprets) the side-effects described in the `IO`!
-- It's the single _entry point_ to a **pure** program.
+- `IOApp` describes a _main_ which **executes** an `IO` 
+- It's the single _entry point_ to a **pure** program (a.k.a. *End of the world*).
+- It **runs** (interprets) the effects described in the `IO`!
 
 ---
 
@@ -740,13 +740,13 @@ That's it!
 ## Cons:
 - still **low level**
 - how to specify message confirmation?
-- what if the user needs to implement a never-ending concurrent message consumer?
+- what if the user needs to implement a **never-ending concurrent message consumer**?
 
 ---
 
 # Switching to top-down
 
-- Let's evaluate how we can model an api for a never-ending message consumer!
+- Let's evaluate how we can model an api for a **never-ending message consumer**!
 
 ---
 
@@ -926,8 +926,8 @@ object Demo extends IOApp.Simple {
 
 ## AtLeastOnceConsumer - 1st iteration
 
-- all effects are expressed in the types (`IO`, etc...) ✅
-- resource lifecycle handled via `Resource` ✅
+- all **effects** are expressed in the types (`IO`, etc...) ✅
+- **resource lifecycle** handled via `Resource` ✅
 - messages in the queue are exposed via a `Stream` ✅
 
 ---
@@ -985,7 +985,7 @@ Ideally...
 - `handle` should be provided with a function `JmsMessage` => `IO[TransactionResult]`
   - **lower chanches for the client to do the wrong thing**!
 - if errors are raised in the handle function, this is a bug and the program will terminate without confirming the message
-- errors regarding the business logic should be handled inside the program, reacting accordingly (ending with either a commit or a rollback)
+- **errors regarding the business logic should be handled inside the program, reacting accordingly** (ending with either a commit or a rollback)
 
 ---
 
@@ -1055,12 +1055,12 @@ object Demo extends IOApp.Simple {
 
 ## AtLeastOnceConsumer - 2nd iteration
 
-- all effects are expressed in the types (`IO`, etc...) ✅
-- resource lifecycle handled via `Resource` ✅
+- all **effects** are expressed in the types (`IO`, etc...) ✅
+- **resource lifecycle** handled via `Resource` ✅
 - not exposing messages to `Stream` anymore, **it made things harder to get the design right**!
-- the client is ~~forced~~ guided to do the right thing ✅
+- the client is ~~forced~~ guided to do the right thing<sup>TM</sup> ✅
 
-Still, concurrency is not there yet...
+Still, _concurrency_ is not there yet...
 
 ----
 
@@ -1069,7 +1069,7 @@ Still, concurrency is not there yet...
 
 - A `JMSContext` is the main interface in the simplified JMS API introduced for JMS 2.0. 
 - In terms of the JMS 1.1 API a `JMSContext` should be thought of as representing both a `Connection` and a `Session`
-- A *connection* represents a physical link to the JMS server and a *session* represents a **single-threaded context** for sending and receiving messages.
+- A **connection** represents a physical link to the JMS server and a **session** represents a **single-threaded context** for sending and receiving messages.
 - Applications which require **multiple sessions** to be created on the same connection should:
   - create a root contenxt using the `createContext` methods on the `ConnectionFactory`
   - then use the `createContext` method on the root context to create additional contexts instances that use the same connection
@@ -1180,10 +1180,10 @@ object Demo extends IOApp.Simple {
 
 ## AtLeastOnceConsumer - 3rd iteration
 
-- all effects are expressed in the types (`IO`, etc...) ✅
-- resource lifecycle handled via `Resource` ✅
-- the client is ~~forced~~ guided to do the right thing ✅
--  concurrency ✅
+- all **effects** are expressed in the types (`IO`, etc...) ✅
+- **resource lifecycle** handled via `Resource` ✅
+- the client is ~~forced~~ guided to do the right thing<sup>TM</sup> ✅
+-  **concurrency** ✅
 
 ---
 
@@ -1205,6 +1205,15 @@ I just found this to be:
 - We used a bunch of **common operators** (`map`, `flatMap`, `traverse`)
 - We wrote a little code, **iteratively improving the design**
 - We achieved what we needed: a fully functioning functional minimal lib
+
+---
+
+# References
+
+- https://github.com/AL333Z/fp-lib-design
+- https://github.com/typelevel/cats-effect
+- https://github.com/fp-in-bo/jms4s
+- https://github.com/profunktor/fs2-rabbit
 
 ---
 
