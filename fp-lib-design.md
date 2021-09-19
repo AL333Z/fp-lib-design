@@ -962,6 +962,40 @@ But...
 
 ---
 
+## AtLeastOnceConsumer - 1st iteration
+
+But...
+
+[.column]
+- what happens if the client **forget to `commit`/`rollback`**?
+
+    ```scala
+    consumer.evalMap { msg => 
+      logger.info(msg.show) 
+    }
+    ```
+
+- what happens if the client **`commit`/`rollback` multiple times** the same message?
+
+    ```scala
+    consumer.evalMap { msg => 
+      committer(CommitAction.Commit) >> 
+        committer(CommitAction.Rollback) 
+    }
+    ```
+
+[.column]
+- what happens if the client **evaluates the stream multiple times**?
+  
+  ```scala
+    consumer.evalMap{ ... } ++
+      consumer.evalMap{ ... }
+  ```
+
+- how to **support concurrency**?
+
+---
+
 # Can we do better?
 
 - Let's think how is the API we'd like to expose...
@@ -1296,3 +1330,22 @@ I just found this to be:
 ---
 
 # Thanks
+
+---
+
+# Bonus
+
+## Tagless final
+
+- Couldn't fit in 45 minutes :)
+- The actual lib is written with Tagless Final.
+
+---
+
+# Bonus
+
+## Other ecosystems?
+
+- Not worth it, for very different reasons.
+  - Lightbend stack: not as composable as the FP counterpart, side-effects.
+  - ZIO: I just don't like their rhetoric.
