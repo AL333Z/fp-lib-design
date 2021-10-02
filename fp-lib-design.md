@@ -77,6 +77,7 @@ __Java Message Service__ a.k.a. JMS
 
 ---
 
+<!--
 ## JMS main elements
 
 - __Provider__: an implementation of JMS (ActiveMQ, IBM MQ, RabbitMQ, etc...)
@@ -85,7 +86,7 @@ __Java Message Service__ a.k.a. JMS
 - __Queue__: a buffer that contains messages sent and waiting to be read
 
 ---
-
+-->
 # Let's start
 ## with a bottom-up approach
 
@@ -848,6 +849,7 @@ object Stream {
 
 class Stream[O]{
   def evalMap[O2](f: O => IO[O2]): Stream[O2]
+  def repeat: Stream[O]
   ...
   def map[O2](f: O => O2): Stream[O2]
   def flatMap[O2](f: O => Stream[O2]): Stream[O2]
@@ -929,36 +931,6 @@ object Demo extends IOApp.Simple {
 - all **effects** are expressed in the types (`IO`, etc...) ✅
 - **resource lifecycle** handled via `Resource` ✅
 - messages in the queue are exposed via a `Stream` ✅
-
----
-
-## AtLeastOnceConsumer - 1st iteration
-
-But...
-
-- what happens if **the client messes with our lib**?
-  - the client **forget to `commit`/`rollback`**?
-
-    ```scala
-    consumer.evalMap { msg => logger.info(msg.show) }
-    ```
-  - the client **`commit`/`rollback` multiple times** the same message?
-
-    ```scala
-    consumer.evalMap { msg => 
-      committer(CommitAction.Commit) >> 
-        committer(CommitAction.Rollback) 
-    }
-    ```
-
-  - the client **evaluates the stream multiple times**?
-  
-  ```scala
-    consumer.evalMap{ ... } ++
-      consumer.evalMap{ ... }
-  ```
-
-- how to **support concurrency**?
 
 ---
 
@@ -1121,6 +1093,8 @@ Ref: https://docs.oracle.com/javaee/7/api/javax/jms/JMSContext.html
 
 ---
 
+<!--
+
 ## AtLeastOnceConsumer - 3rd iteration
 
 [.column]
@@ -1212,13 +1186,19 @@ object Demo extends IOApp.Simple {
 
 ---
 
+-->
+
 ## AtLeastOnceConsumer - 3rd iteration
 
 [.column]
 [.code-highlight: none]
 [.code-highlight: 8-15]
-[.code-highlight: 8-15, 21]
-[.code-highlight: 8-15, 21, 27-28, 37]
+[.code-highlight: 8-16]
+[.code-highlight: 1-17]
+[.code-highlight: 1-24]
+[.code-highlight: 1-25, 37]
+[.code-highlight: 1-26, 36-37]
+[.code-highlight: 1-37]
 [.code-highlight: all]
 
 ```scala
@@ -1229,7 +1209,7 @@ object AtLeastOnceConsumer {
     queueName: QueueName,
     concurrencyLevel: Int
   ): Resource[IO, AtLeastOnceConsumer] =
-    KeyPool.Builder[IO, Unit, (JmsContext, JmsMessageConsumer)](_ =>
+    Pool.Builder[IO, (JmsContext, JmsMessageConsumer)](
       for {
         ctx      <- rootContext.makeTransactedContext
         consumer <- ctx.makeJmsConsumer(queueName)
@@ -1238,17 +1218,16 @@ object AtLeastOnceConsumer {
     .withMaxTotal(concurrencyLevel)
     .build
     .map(pool => new AtLeastOnceConsumer(pool, concurrencyLevel))
-
 }
 
 class AtLeastOnceConsumer private[lib] (
-  private[lib] val pool: KeyPool[IO, Unit, (JmsContext, JmsMessageConsumer)],
+  private[lib] val pool: Pool[IO, (JmsContext, JmsMessageConsumer)],
   private[lib] val concurrencyLevel: Int
 ) {
 
   def handle(runBusinessLogic: JmsMessage => IO[TransactionResult]): IO[Nothing] =
     IO.parSequenceN[Id, Unit](concurrencyLevel) {
-        pool.take(()).use { res =>
+        pool.take.use { res =>
           val (ctx, consumer) = res.value
           for {
             message <- consumer.receive
@@ -1347,5 +1326,5 @@ I just found this to be:
 ## Other ecosystems?
 
 - Not worth it, for very different reasons.
-  - Lightbend stack: not as composable as the FP counterpart, side-effects.
+  - Lightbend stack: not as composable as the FP counterpart, side-effects, missing referential transparent abstractions for effects.
   - ZIO: I just don't like their rhetoric.
