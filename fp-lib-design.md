@@ -31,10 +31,10 @@ autoscale: true
 
 # Agenda
 
-- a sample architecture, a reference library to wrap
+- a sample use case, a reference **library to wrap**
 - designing library apis
-  - introduce a bunch of building blocks
-  - refine edges, evaluate alternatives, iterate
+  - introduce a bunch of **building blocks**
+  - **refine** edges, **evaluate** alternatives, **iterate**
 
 ---
 
@@ -62,9 +62,9 @@ We'll just put our attention on **_designing a set of APIs_** which wraps an exi
 
 __Java Message Service__ a.k.a. JMS
 
-- provides generic messaging models
-- able to handle the producer–consumer problem
 - can be used to facilitate the sending and receiving of messages between enterprise software systems, whatever it means enterprise!
+- a bunch of Java interfaces
+- each provider offers an implementation (e.g. IBM MQ, ActiveMQ, RabbitMQ, etc...)
 
 ---
 
@@ -181,8 +181,8 @@ Another hierarchy with a set of common ops and type-specific ops
 - having all __effects__ explicitly marked in the types
 - properly handle __resource__ acquisition/disposal (avoiding leaks!)
 - evaluate what is the __design which better supports our intent__
-- __prevent__ the developer using our lib from doing __wrong things__ (e.g. unconfirmed messages, deadlocks, etc...) by design
-- offering a __high-level__ set of APIs
+  - __prevent__ the developer using our lib from doing __wrong things__ (e.g. unconfirmed messages, deadlocks, etc...) by design
+  - offering a __high-level__ set of APIs
 
 ---
 <!--
@@ -328,9 +328,8 @@ public void receiveMessage(ConnectionFactory connectionFactory, String queueName
 }
 ```
 
-- how to handle JMSRuntimeException?
-- how to build a consumer that can be injected in our application components?
-- how to handle the resource lifecycle?
+- how to handle __side-effects__?
+- how to handle the __resource lifecycle__?
 
 ---
 
@@ -457,7 +456,6 @@ class JmsTransactedContext private[lib] (
 ```
 
 - handle JMSRuntimeException ✅
-- build a consumer that can be injected in our application components ✅
 - handle the resource lifecycle ❌ 
 
 ---
@@ -585,10 +583,13 @@ class JmsTransactedContext private[lib] (
 ```
 
 - handle JMSRuntimeException ✅
-- build a consumer that can be injected in our application components ✅
 - handle the resource lifecycle ✅
 
 ^ You can _lift_ any `IO[A]` into a `Resource[A]` with a no-op release via `Resource.eval`
+
+---
+
+# How to receive?
 
 ---
 
@@ -622,7 +623,7 @@ class JmsMessageConsumer private[lib] (
 
 ---
 
-## JmsMessageConsumer - alternative implementation
+## JmsMessageConsumer - alternative
 
 [.code-highlight: 8]
 [.code-highlight: all]
@@ -706,7 +707,7 @@ object SampleConsumer extends IOApp.Simple {
 
 ---
 
-## Adding support for a provider (e.g. IBM MQ)
+## Adding support for a provider
 
 ```scala
 object ibmMQ {
@@ -733,12 +734,13 @@ That's it!
 
 ---
 
-## Pros:
+## DONE:
+- **effects** handled respecting _referential transparency_
 - **resources** get acquired and released in order, the user **can't leak** them
 - the **business logic** is made by __*pure functions*__
 
 
-## Cons:
+## TODO:
 - still **low level**
 - how to specify message confirmation?
 - what if the user needs to implement a **never-ending concurrent message consumer**?
@@ -778,7 +780,7 @@ object AtLeastOnceConsumer {
         case CommitAction.Rollback => IO.blocking(context.raw.rollback())
       }
     val buildStreamingConsumer = (consumer: JmsMessageConsumer) => 
-      Stream.eval[IO, JmsMessage](consumer.receive).repeat
+      Stream.eval(consumer.receive).repeat
 
     context
       .makeJmsConsumer(queueName)
@@ -797,15 +799,16 @@ object Demo extends IOApp.Simple {
 
   override def run: IO[Unit] =
     jmsTransactedContextRes.flatMap(ctx => 
-      AtLeastOnceConsumer.make(ctx, queueName)).use {
-        case (consumer, committer) =>
-          consumer.evalMap { msg =>
-            // whatever business logic you need to perform
-            logger.info(msg.show) >> 
-              committer(CommitAction.Commit)
-          }
-          .compile.drain
-      }
+      AtLeastOnceConsumer.make(ctx, queueName))
+        .use {
+          case (consumer, committer) =>
+            consumer.evalMap { msg =>
+              // whatever business logic you need to perform
+              logger.info(msg.show) >> 
+                committer(CommitAction.Commit)
+            }
+            .compile.drain
+        }
 }
 ```
 
@@ -889,7 +892,7 @@ object AtLeastOnceConsumer {
         case CommitAction.Rollback => IO.blocking(context.raw.rollback())
       }
     val buildStreamingConsumer = (consumer: JmsMessageConsumer) => 
-      Stream.eval[IO, JmsMessage](consumer.receive).repeat
+      Stream.eval(consumer.receive).repeat
 
     context
       .makeJmsConsumer(queueName)
@@ -910,22 +913,22 @@ object Demo extends IOApp.Simple {
 
   override def run: IO[Unit] =
     jmsTransactedContextRes.flatMap(ctx => 
-      AtLeastOnceConsumer.make(ctx, queueName)).use {
-        case (consumer, committer) =>
-          consumer.evalMap { msg =>
-            // whatever business logic you need to perform
-            logger.info(msg.show) >> 
-              committer(CommitAction.Commit)
-          }
-          .compile.drain
-      }
+      AtLeastOnceConsumer.make(ctx, queueName))
+        .use {
+          case (consumer, committer) =>
+            consumer.evalMap { msg =>
+              // whatever business logic you need to perform
+              logger.info(msg.show) >> 
+                committer(CommitAction.Commit)
+            }
+            .compile.drain
+        }
 }
 ```
 
 - Inspired by fs2-rabbit
 
 ---
-
 ## AtLeastOnceConsumer - 1st iteration
 
 - all **effects** are expressed in the types (`IO`, etc...) ✅
@@ -936,7 +939,7 @@ object Demo extends IOApp.Simple {
 
 ## AtLeastOnceConsumer - 1st iteration
 
-But...
+### But...
 
 [.column]
 - what happens if the client **forget to `commit`/`rollback`**?
@@ -1042,16 +1045,16 @@ object AtLeastOnceConsumer {
 object Demo extends IOApp.Simple {
 
   override def run: IO[Unit] =
-    jmsTransactedContextRes
-      .flatMap(ctx => AtLeastOnceConsumer.make(ctx, queueName))
-      .use(consumer =>
-        consumer.handle { msg =>
-          for {
-            _ <- logger.info(msg.show)
-            _ <- ??? // ... actual business logic...
-          } yield TransactionResult.Commit
-        }
-      )
+    jmsTransactedContextRes.flatMap(ctx => 
+      AtLeastOnceConsumer.make(ctx, queueName))
+        .use(consumer =>
+          consumer.handle { msg =>
+            for {
+              _ <- logger.info(msg.show)
+              _ <- ??? // ... actual business logic...
+            } yield TransactionResult.Commit
+          }
+        )
 }
 ```
 
@@ -1209,7 +1212,7 @@ object AtLeastOnceConsumer {
     queueName: QueueName,
     concurrencyLevel: Int
   ): Resource[IO, AtLeastOnceConsumer] =
-    Pool.Builder[IO, (JmsContext, JmsMessageConsumer)](
+    Pool.Builder(
       for {
         ctx      <- rootContext.makeTransactedContext
         consumer <- ctx.makeJmsConsumer(queueName)
@@ -1226,7 +1229,7 @@ class AtLeastOnceConsumer private[lib] (
 ) {
 
   def handle(runBusinessLogic: JmsMessage => IO[TransactionResult]): IO[Nothing] =
-    IO.parSequenceN[Id, Unit](concurrencyLevel) {
+    IO.parSequenceN(concurrencyLevel) {
         pool.take.use { res =>
           val (ctx, consumer) = res.value
           for {
@@ -1252,16 +1255,16 @@ class AtLeastOnceConsumer private[lib] (
 object Demo extends IOApp.Simple {
 
   override def run: IO[Unit] =
-    jmsTransactedContextRes
-      .flatMap(ctx => AtLeastOnceConsumer.make(ctx, queueName, 5))
-      .use(consumer =>
-        consumer.handle { msg =>
-          for {
-            _ <- logger.info(msg.show)
-            _ <- ??? // ... actual business logic...
-          } yield TransactionResult.Commit
-        }
-      )
+    jmsTransactedContextRes.flatMap(ctx => 
+      AtLeastOnceConsumer.make(ctx, queueName, 5))
+        .use(consumer =>
+          consumer.handle { msg =>
+            for {
+              _ <- logger.info(msg.show)
+              _ <- ??? // ... actual business logic...
+            } yield TransactionResult.Commit
+          }
+        )
 }
 ```
 
