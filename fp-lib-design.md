@@ -73,7 +73,6 @@ __Java Message Service__ a.k.a. JMS
 - ~~old~~ stable enough (born in 1998, latest revision in 2015)
 - its apis are a __good testbed for sketching a purely functional wrapper__
 - found pretty much nothing about (no FP-like bindings...)
-- I don't like suffering to much, while working
 
 ---
 
@@ -165,7 +164,7 @@ public interface StreamMessage extends Message { ... }
 Another hierarchy with a set of common ops and type-specific ops
 
 ---
-!-->
+
 
 ## A look at the beast
 
@@ -175,11 +174,10 @@ Another hierarchy with a set of common ops and type-specific ops
 > consuming from a queue, do something useful with each message, and either commit or rollback each message
 
 ---
+!-->
 
-## What can we do to improve them these APIs??
+## What can we do to improve them these APIs?
 
-- having all __effects__ explicitly marked in the types
-- properly handle __resource__ acquisition/disposal (avoiding leaks!)
 - evaluate what is the __design which better supports our intent__
   - __prevent__ the developer using our lib from doing __wrong things__ (e.g. unconfirmed messages, deadlocks, etc...) by design
   - offering a __high-level__ set of APIs
@@ -328,6 +326,8 @@ public void receiveMessage(ConnectionFactory connectionFactory, String queueName
 }
 ```
 
+Let's start from the low level stuff...
+
 - how to handle __side-effects__?
 - how to handle the __resource lifecycle__?
 
@@ -369,10 +369,9 @@ public void receiveMessage(ConnectionFactory connectionFactory, String queueName
 ```scala
 object IO {
   def delay[A](a: => A): IO[A]
-  def pure[A](a: A): IO[A]
   def raiseError[A](e: Throwable): IO[A]
-  def sleep(duration: FiniteDuration): IO[Unit]
   def async[A](k: /* ... */): IO[A]
+  def blocking[A](/* ... */): IO[A]
   ...
 }
 
@@ -477,22 +476,14 @@ class JmsTransactedContext private[lib] (
 
 ---
 
-[.background-color: #FFFFFF]
-
-# How to fill the abstraction gap?
-
-![Inline](pics/resource.png)
-
----
-
 ## Introducing Resource
 
 [.column]
 
 #### Building resources
 
-[.code-highlight: 1-7]
-[.code-highlight: 9-15]
+[.code-highlight: 1-8]
+[.code-highlight: 10-16]
 [.code-highlight: all]
 
 ```scala
@@ -500,15 +491,16 @@ object Resource {
   def make[A](
     acquire: IO[A])(
     release: A => IO[Unit]): Resource[A]
+    
   def fromAutoCloseable[A <: AutoCloseable](
     acquire: IO[A]): Resource[A]
 }
 
 class Resource[A] {
-  def use[B](f: A => IO[B]): IO[B]
-
   def map[B](f: A => B): Resource[B]
   def flatMap[B](f: A => Resource[B]): Resource[B]
+
+  def use[B](f: A => IO[B]): IO[B]
   ...
 }
 ```
@@ -554,6 +546,14 @@ Output:
 ```
 
 ^ **_Nested_ resources** are **released in reverse order** of acquisition 
+
+---
+
+[.background-color: #FFFFFF]
+
+# How to fill the abstraction gap?
+
+![Inline](pics/resource.png)
 
 ---
 
@@ -619,7 +619,6 @@ class JmsMessageConsumer private[lib] (
 - only exposing `receive`, which is an `IO` value which:
   - _**repeats**_ a **check-and-receive** operation (`receiveNoWait()`) till a message is ready
   - _**completes**_ the IO with the message read
-  - _**cancels**_ the computation, if a cancellation gets triggered (e.g. a `SIGTERM` signal)
 
 ---
 
@@ -835,7 +834,7 @@ object Demo extends IOApp.Simple {
 ---
 
 [.code-highlight: 1-6]
-[.code-highlight: 8-13]
+[.code-highlight: 8-14]
 [.code-highlight: all]
 
 ## Introducing Stream
@@ -851,11 +850,11 @@ object Stream {
 }
 
 class Stream[O]{
-  def evalMap[O2](f: O => IO[O2]): Stream[O2]
-  def repeat: Stream[O]
-  ...
   def map[O2](f: O => O2): Stream[O2]
   def flatMap[O2](f: O => Stream[O2]): Stream[O2]
+  ...
+  def evalMap[O2](f: O => IO[O2]): Stream[O2]
+  def repeat: Stream[O]
 }
 ```
 
@@ -905,7 +904,7 @@ object AtLeastOnceConsumer {
 [.column]
 
 [.code-highlight: none]
-[.code-highlight: 5-11]
+[.code-highlight: 5-12]
 [.code-highlight: all]
 
 ```scala
@@ -1002,6 +1001,7 @@ Ideally...
 
 [.column]
 [.code-highlight: 1-4,15]
+[.code-highlight: 1-13,15]
 [.code-highlight: 1-15]
 [.code-highlight: all]
 
@@ -1039,7 +1039,7 @@ object AtLeastOnceConsumer {
 
 [.column]
 [.code-highlight: none]
-[.code-highlight: all]
+[.code-highlight: 5-13]
 
 ```scala
 object Demo extends IOApp.Simple {
@@ -1249,7 +1249,7 @@ class AtLeastOnceConsumer private[lib] (
 [.column]
 
 [.code-highlight: none]
-[.code-highlight: all]
+[.code-highlight: 5-13]
 
 ```scala
 object Demo extends IOApp.Simple {
@@ -1295,8 +1295,8 @@ I just found this to be:
 
 # We came a long way...
 
-- We used a bunch of **data types** (`IO`, `Resource`, `Queue`)
-- We used a bunch of **common operators** (`map`, `flatMap`, `traverse`)
+- We used a bunch of **data types** (`IO`, `Resource`, `Stream`)
+- We used a bunch of **common operators** (`map`, `flatMap`)
 - We wrote a little code, **iteratively improving the design**
 - We achieved what we needed: a fully functioning functional minimal lib
 
