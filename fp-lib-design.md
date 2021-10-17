@@ -12,7 +12,6 @@ autoscale: true
 - Senior Software Engineer @ Moneyfarm
 - Several years in the scala/typelevel ecosystem
 - Member of _@FPinBO_ ![inline 10%](pics/fpinbo.jpg)
-- I like to run
 
 ![right](pics/pic.jpg)
 
@@ -755,9 +754,11 @@ That's it!
 ## AtLeastOnceConsumer - 1st iteration
 
 [.column]
-[.code-highlight: 3-7]
-[.code-highlight: 9]
-[.code-highlight: 10]
+[.code-highlight: 1, 27]
+[.code-highlight: 1, 3-7, 27]
+[.code-highlight: 1, 9, 27]
+[.code-highlight: 1, 10, 27]
+[.code-highlight: 1, 3-13, 27]
 
 ```scala
 object AtLeastOnceConsumer {
@@ -817,13 +818,14 @@ object Demo extends IOApp.Simple {
 #### A *sequence* of effectful computation
 
 ---
-
+<!--
 ## Introducing Stream
 
 - **Simplify the way we write concurrent streaming consumers**
 - **_Pull-based_**, a consumer pulls its values by repeatedly performing pull steps
 
 ---
+-->
 
 [.background-color: #FFFFFF]
 
@@ -860,6 +862,65 @@ class Stream[O]{
 
 [.footer: NB: not actual code, just a simplification sticking with the IO type]
 
+---
+
+## AtLeastOnceConsumer - 1st iteration
+
+[.column]
+[.code-highlight: 1, 3-13, 27]
+
+```scala
+object AtLeastOnceConsumer {
+
+  sealed trait CommitAction
+  object CommitAction {
+    case object Commit   extends CommitAction
+    case object Rollback extends CommitAction
+  }
+
+  type Committer = CommitAction => IO[Unit]
+  type Consumer  = Stream[IO, JmsMessage]
+
+  def make(context: JmsTransactedContext, 
+           queueName: QueueName): Resource[IO, (Consumer, Committer)] = {
+    val committer = (txRes: CommitAction) =>
+      txRes match {
+        case CommitAction.Commit   => IO.blocking(context.raw.commit())
+        case CommitAction.Rollback => IO.blocking(context.raw.rollback())
+      }
+    val buildStreamingConsumer = (consumer: JmsMessageConsumer) => 
+      Stream.eval(consumer.receive).repeat
+
+    context
+      .makeJmsConsumer(queueName)
+      .map(buildStreamingConsumer)
+      .map(consumer => (consumer, committer))
+  }
+}
+```
+
+[.column]
+
+[.code-highlight: none]
+[.code-highlight: 5-12]
+
+```scala
+object Demo extends IOApp.Simple {
+
+  override def run: IO[Unit] =
+    jmsTransactedContextRes.flatMap(ctx => 
+      AtLeastOnceConsumer.make(ctx, queueName))
+        .use {
+          case (consumer, committer) =>
+            consumer.evalMap { msg =>
+              // whatever business logic you need to perform
+              logger.info(msg.show) >> 
+                committer(CommitAction.Commit)
+            }
+            .compile.drain
+        }
+}
+```
 ---
 
 ## AtLeastOnceConsumer - 1st iteration
@@ -904,7 +965,6 @@ object AtLeastOnceConsumer {
 [.column]
 
 [.code-highlight: none]
-[.code-highlight: 5-12]
 [.code-highlight: all]
 
 ```scala
@@ -1280,7 +1340,7 @@ object Demo extends IOApp.Simple {
 -  **concurrency** ✅
 
 ---
-
+<!--
 # Are there other ways to achieve the same?
 
 No doubt.
@@ -1292,7 +1352,7 @@ I just found this to be:
 - reasonably straight-forward to present
 
 ---
-
+-->
 # We came a long way...
 
 - We used a bunch of **data types** (`IO`, `Resource`, `Stream`)
