@@ -354,14 +354,13 @@ Let's start from the low level stuff...
 
 ---
 
-## IO and combinators
+## Introducing IO
 
 
 [.column]
 
 #### Building effects
 
-[.code-highlight: none]
 [.code-highlight: 1-8]
 [.code-highlight: all]
 
